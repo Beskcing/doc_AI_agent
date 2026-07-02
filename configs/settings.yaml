@@ -1,0 +1,40 @@
+# 应用全局配置
+# 所有路径相对于项目根目录
+
+llm:
+  default_provider: qwen
+  providers:
+    qwen:
+      model: qwen-plus
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      temperature: 0.1
+      max_tokens: 4096
+    glm:
+      model: glm-4
+      base_url: "https://open.bigmodel.cn/api/paas/v4"
+      temperature: 0.1
+      max_tokens: 4096
+
+rag:
+  chroma_path: "knowledge_data/chroma_db"
+  collection_name: "formatting_standards"
+  chunk_size: 700
+  chunk_overlap_ratio: 0.15
+  embedding_provider: "dashscope"
+  embedding_model: "text-embedding-v3"
+  top_k: 5
+  bm25_weight: 0.3
+  vector_weight: 0.7
+
+paths:
+  input_dir: "data/input"
+  output_dir: "data/output"
+  knowledge_data_dir: "knowledge_data"
+  raw_docs_dir: "knowledge_data/raw_docs"
+  prompts_dir: "prompts"
+
+pandoc:
+  executable_path: "pandoc"
+  extra_args:
+    - "--from=markdown+raw_html"
+    - "--to=docx"

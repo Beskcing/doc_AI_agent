@@ -1,0 +1,18 @@
+# LLM Provider 配置说明
+# 通过 settings.yaml 中 llm.default_provider 字段切换默认 provider
+# API Key 通过 .env 文件或环境变量设置:
+#   - Qwen (通义千问): DASHSCOPE_API_KEY
+#   - GLM (智谱):      ZHIPUAI_API_KEY
+
+providers:
+  qwen:
+    description: "阿里云通义千问，通过 DashScope 兼容 OpenAI API 调用"
+    model: qwen-plus
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    env_key: DASHSCOPE_API_KEY
+
+  glm:
+    description: "智谱 AI GLM 系列模型"
+    model: glm-4
+    base_url: "https://open.bigmodel.cn/api/paas/v4"
+    env_key: ZHIPUAI_API_KEY

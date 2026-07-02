@@ -1,0 +1,49 @@
+# LLM & 编排
+langchain>=0.3
+langchain-core>=0.3
+langchain-openai>=0.3
+langgraph>=0.2
+
+# 向量数据库
+chromadb>=0.5
+langchain-chroma>=0.2
+
+# 混合检索
+rank-bm25>=0.2
+jieba>=0.42
+
+# Embedding
+dashscope>=1.14
+
+# 格式转换
+pypandoc>=1.11
+
+# 文档渲染
+python-docx>=1.0
+
+# 数据校验 & 配置
+pydantic>=2.0
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# 工具
+rich>=13.0
+
+# Web API
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9
+python-jose[cryptography]>=3.3
+aiofiles>=24.1
+
+# 数据库
+sqlalchemy>=2.0
+
+# MinerU (可选)
+# magic-pdf>=0.10
+
+# 开发依赖
+# pytest>=8.0
+# pytest-asyncio>=0.23
+# pytest-cov>=5.0
+# ruff>=0.5
