@@ -419,8 +419,14 @@ class TaskManager:
             finally:
                 db.close()
 
-            # ──────── 阶段 2.5: 样式提取（LLM + RAG） ────────
-            style_config = self._generate_style_config(task_id, cleaned_markdown, intent)
+            # ──────── 阶段 2.5: 样式提取（LLM + RAG 或模板） ────────
+            template_id = config.get("template_id")
+            if template_id:
+                # 使用指定模板的样式配置，跳过 LLM 提取
+                style_config = self._get_template_style(template_id)
+                logger.info("任务 %s: 使用模板 %s 的样式配置", task_id, template_id)
+            else:
+                style_config = self._generate_style_config(task_id, cleaned_markdown, intent)
 
             # ──────── 阶段 3: 确定基础 DOCX ────────
             # PDF 文件优先使用 MinerU 原始 DOCX；非 PDF 文件回退到 Pandoc 转换
@@ -588,6 +594,86 @@ class TaskManager:
                 logger.info("任务 %s: 已保存 MinerU DOCX 路径: %s", task_id, mineru_docx_path)
         finally:
             db.close()
+
+    def _get_template_style(self, template_id: str) -> dict:
+        """从数据库获取模板的样式配置
+
+        Args:
+            template_id: 模板 ID
+
+        Returns:
+            样式配置字典，模板不存在时返回默认配置
+        """
+        from src.db.crud import StyleTemplateCRUD
+
+        db = _get_db()
+        try:
+            template = StyleTemplateCRUD.get(db, template_id)
+            if template:
+                return template.style_config
+            logger.warning("模板不存在: %s，使用默认样式", template_id)
+            return self._default_style_config()
+        finally:
+            db.close()
+
+    def apply_template_to_task(self, task_id: str, style_config: dict) -> str:
+        """对已完成任务重新应用样式模板
+
+        使用任务的基础 DOCX（MinerU 原始或 Pandoc 生成）重新渲染样式。
+
+        Args:
+            task_id: 任务 ID
+            style_config: 新的样式配置
+
+        Returns:
+            样式化后的 DOCX 文件路径
+        """
+        # 获取任务信息
+        task = self.get_task(task_id)
+        if not task:
+            raise ValueError(f"任务不存在: {task_id}")
+        if task.status != "completed":
+            raise ValueError(f"任务尚未完成，无法应用模板")
+
+        config = task.config or {}
+
+        # 确定基础 DOCX 路径
+        # 优先使用 MinerU 原始 DOCX，其次使用已生成的 DOCX
+        base_docx = config.get("mineru_docx_path")
+        if not base_docx or not Path(base_docx).exists():
+            # 回退：使用当前 result_path 作为基础
+            base_docx = task.result_path
+            if not base_docx or not Path(base_docx).exists():
+                # 最后回退：在输出目录查找
+                result_dir = Path("data/output") / task_id
+                if result_dir.exists():
+                    for pattern in ("full.docx", "formatted.docx", "formatted_styled.docx"):
+                        candidate = result_dir / pattern
+                        if candidate.exists():
+                            base_docx = str(candidate)
+                            break
+
+        if not base_docx or not Path(base_docx).exists():
+            raise ValueError(f"找不到基础 DOCX 文件，无法重新应用模板")
+
+        logger.info("任务 %s: 重新应用模板，基础 DOCX: %s", task_id, base_docx)
+
+        # 应用新样式
+        styled_path = self._apply_style(task_id, base_docx, style_config)
+
+        # 更新数据库
+        db = _get_db()
+        try:
+            task_db = TaskCRUD.get(db, task_id)
+            if task_db:
+                task_db.style_config_preview = style_config
+                task_db.result_path = styled_path
+                db.commit()
+                logger.info("任务 %s: 模板应用完成，结果: %s", task_id, styled_path)
+        finally:
+            db.close()
+
+        return styled_path
 
     def get_mineru_docx_path(self, task_id: str) -> str | None:
         """获取 MinerU 提供的 DOCX 文件路径"""

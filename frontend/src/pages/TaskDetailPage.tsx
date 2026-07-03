@@ -12,6 +12,8 @@ import {
   Timeline,
   Tabs,
   Empty,
+  Modal,
+  Select,
 } from 'antd'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -22,9 +24,10 @@ import {
   ReloadOutlined,
   FileWordOutlined,
   FileTextOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl } from '../services/api'
+import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, listTemplates, applyTemplateToTask } from '../services/api'
 
 interface TaskDetail {
   id: string
@@ -106,6 +109,21 @@ const TaskDetailPage: React.FC = () => {
   const [docxPreviewLoaded, setDocxPreviewLoaded] = useState(false)
   const [mineruDocxPreviewLoaded, setMineruDocxPreviewLoaded] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const [templateModalVisible, setTemplateModalVisible] = useState(false)
+  const [templates, setTemplates] = useState<Array<{ value: string; label: string }>>([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
+  const [applyingTemplate, setApplyingTemplate] = useState(false)
+
+  const loadTemplates = useCallback(async () => {
+    try {
+      const res = await listTemplates()
+      if (res.data.data?.items) {
+        setTemplates(res.data.data.items.map((t: { id: string; name: string }) => ({ value: t.id, label: t.name })))
+      }
+    } catch {
+      // 静默
+    }
+  }, [])
 
   const fetchTask = useCallback(async () => {
     if (!taskId) return
@@ -344,6 +362,15 @@ const TaskDetailPage: React.FC = () => {
           {task.status === 'completed' && (
             <>
               <Button
+                icon={<ThunderboltOutlined />}
+                onClick={() => {
+                  setTemplateModalVisible(true)
+                  loadTemplates()
+                }}
+              >
+                应用模板
+              </Button>
+              <Button
                 icon={<EyeOutlined />}
                 onClick={() => {
                   fetchPreview()
@@ -416,6 +443,47 @@ const TaskDetailPage: React.FC = () => {
       </Card>
 
       <Tabs items={tabItems} activeKey={activeTab} onChange={setActiveTab} />
+
+      {/* 应用模板 Modal */}
+      <Modal
+        title="应用样式模板"
+        open={templateModalVisible}
+        onOk={async () => {
+          if (!selectedTemplateId) {
+            message.warning('请选择一个模板')
+            return
+          }
+          setApplyingTemplate(true)
+          try {
+            await applyTemplateToTask(taskId!, { template_id: selectedTemplateId })
+            message.success('模板应用成功')
+            setTemplateModalVisible(false)
+            setSelectedTemplateId('')
+            fetchTask()
+          } catch (err) {
+            message.error(err instanceof Error ? err.message : '应用失败')
+          } finally {
+            setApplyingTemplate(false)
+          }
+        }}
+        onCancel={() => setTemplateModalVisible(false)}
+        okText="应用"
+        cancelText="取消"
+        confirmLoading={applyingTemplate}
+      >
+        <p style={{ marginBottom: 12 }}>
+          选择一个样式模板，将重新渲染 DOCX 文件。此操作不会重新解析 PDF，仅重新应用排版样式。
+        </p>
+        <Select
+          style={{ width: '100%' }}
+          placeholder="选择样式模板"
+          value={selectedTemplateId || undefined}
+          onChange={setSelectedTemplateId}
+          options={templates}
+          showSearch
+          optionFilterProp="label"
+        />
+      </Modal>
     </div>
   )
 }

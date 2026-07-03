@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from src.api.routers import config_router, kb_router, tasks_router, upload_router
+from src.api.routers import chat_router, config_router, kb_router, tasks_router, templates_router, upload_router
 from src.db.database import init_db
 from src.utils.logger import get_logger, setup_logging
 
@@ -55,6 +55,8 @@ app.include_router(upload_router)
 app.include_router(tasks_router)
 app.include_router(kb_router)
 app.include_router(config_router)
+app.include_router(templates_router)
+app.include_router(chat_router)
 
 
 # 健康检查

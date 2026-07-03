@@ -24,6 +24,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   BellOutlined,
+  MessageOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { getTaskStats } from '../services/api'
@@ -37,6 +38,7 @@ const menuItems: MenuItem[] = [
   { key: '/', icon: <DashboardOutlined />, label: '工作台' },
   { key: '/upload', icon: <UploadOutlined />, label: '文档上传' },
   { key: '/tasks', icon: <FileTextOutlined />, label: '任务管理' },
+  { key: '/chat', icon: <MessageOutlined />, label: '对话排版' },
   { key: '/kb', icon: <DatabaseOutlined />, label: '知识库' },
   { key: '/config', icon: <SettingOutlined />, label: '系统配置' },
 ]

@@ -9,7 +9,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from src.db.models import KbDocumentModel, SystemConfigModel, TaskModel
+from src.db.models import KbDocumentModel, StyleTemplateModel, SystemConfigModel, TaskModel
 
 
 class TaskCRUD:
@@ -132,6 +132,56 @@ class KbDocumentCRUD:
         doc = db.query(KbDocumentModel).filter(KbDocumentModel.id == doc_id).first()
         if doc:
             db.delete(doc)
+            db.commit()
+            return True
+        return False
+
+
+class StyleTemplateCRUD:
+    """样式模板 CRUD"""
+
+    @staticmethod
+    def create(db: Session, **kwargs) -> StyleTemplateModel:
+        db_template = StyleTemplateModel(**kwargs)
+        db.add(db_template)
+        db.commit()
+        db.refresh(db_template)
+        return db_template
+
+    @staticmethod
+    def get(db: Session, template_id: str) -> StyleTemplateModel | None:
+        return db.query(StyleTemplateModel).filter(StyleTemplateModel.id == template_id).first()
+
+    @staticmethod
+    def list_templates(
+        db: Session,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[StyleTemplateModel], int]:
+        query = db.query(StyleTemplateModel)
+        total = query.count()
+        templates = query.order_by(StyleTemplateModel.created_at.desc()).offset(
+            (page - 1) * page_size
+        ).limit(page_size).all()
+        return templates, total
+
+    @staticmethod
+    def update(db: Session, template_id: str, **kwargs) -> StyleTemplateModel | None:
+        template = db.query(StyleTemplateModel).filter(StyleTemplateModel.id == template_id).first()
+        if not template:
+            return None
+        for key, value in kwargs.items():
+            if value is not None and hasattr(template, key):
+                setattr(template, key, value)
+        db.commit()
+        db.refresh(template)
+        return template
+
+    @staticmethod
+    def delete(db: Session, template_id: str) -> bool:
+        template = db.query(StyleTemplateModel).filter(StyleTemplateModel.id == template_id).first()
+        if template:
+            db.delete(template)
             db.commit()
             return True
         return False

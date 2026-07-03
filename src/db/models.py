@@ -55,6 +55,26 @@ class KbDocumentModel(Base):
         return f"<KbDocument(id={self.id}, name={self.name})>"
 
 
+class StyleTemplateModel(Base):
+    """样式模板表
+
+    保存用户上传/自定义的排版样式模板，可在创建任务时选择使用。
+    """
+
+    __tablename__ = "style_templates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    style_config: Mapped[dict] = mapped_column(JSON, nullable=False)
+    source_docx_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def __repr__(self) -> str:
+        return f"<StyleTemplate(id={self.id}, name={self.name})>"
+
+
 class SystemConfigModel(Base):
     """系统配置表（单条记录）"""
 

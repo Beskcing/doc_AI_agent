@@ -22,6 +22,7 @@ import {
   batchCreateTasks,
   getSupportedStandards,
   getLlmModels,
+  listTemplates,
 } from '../services/api'
 
 const { Step } = Steps
@@ -52,13 +53,17 @@ const UploadPage: React.FC = () => {
     { value: 'qwen-plus', label: '通义千问 Plus' },
     { value: 'glm-4', label: '智谱 GLM-4' },
   ])
+  const [templates, setTemplates] = useState<Array<{ value: string; label: string }>>([])
 
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const [stdRes, modelRes] = await Promise.all([getSupportedStandards(), getLlmModels()])
+        const [stdRes, modelRes, tplRes] = await Promise.all([getSupportedStandards(), getLlmModels(), listTemplates()])
         if (stdRes.data.data?.length) setStandards(stdRes.data.data)
         if (modelRes.data.data?.length) setLlmModels(modelRes.data.data)
+        if (tplRes.data.data?.items?.length) {
+          setTemplates(tplRes.data.data.items.map((t: { id: string; name: string }) => ({ value: t.id, label: t.name })))
+        }
       } catch {
         // 使用默认值
       }
@@ -107,6 +112,7 @@ const UploadPage: React.FC = () => {
         standard: values.standard,
         use_rag: values.use_rag,
         llm_model: values.llm_model,
+        template_id: values.template_id || undefined,
       })
       const count = res.data.data.count
       message.success(`成功创建 ${count} 个任务`)
@@ -234,6 +240,18 @@ const UploadPage: React.FC = () => {
               tooltip="启用后将从知识库中检索排版规范"
             >
               <Switch />
+            </Form.Item>
+
+            <Form.Item
+              label="样式模板"
+              name="template_id"
+              tooltip="选择模板后将跳过 LLM 样式提取，直接使用模板样式。在对话排版页面创建模板。"
+            >
+              <Select
+                options={templates}
+                allowClear
+                placeholder="不选择则使用 LLM 自动提取样式"
+              />
             </Form.Item>
 
             <Form.Item>

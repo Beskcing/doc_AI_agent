@@ -48,3 +48,4 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-03 | feat | 新增 MinerU 原始 DOCX 下载功能：解析时请求 extra_formats=["docx"]，任务完成后可下载 MinerU 原始排版 DOCX |
 | 2026-07-03 | fix | 全栈测试修复：RAG raw_docs_dir 属性缺失、HTML 表格占位符被 LLM 清除（改用纯文本标记+跳过含占位符的 LLM 审查）、Pandoc TeX math \tag 不支持、DOCX 预览图片 404（--embed-resources）、前端时间格式化（dayjs）、配置页浮点精度 |
 | 2026-07-03 | fix | 安装 dashscope SDK，RAG 知识库混合检索（BM25+向量）完全打通 |
+| 2026-07-03 | feat | 新增对话排版模式：LLM对话修改样式+表单编辑器、Word模板上传与格式提取(docx_style_extractor)、样式模板管理(CRUD+DB持久化)、模板应用于新任务和已有任务 |

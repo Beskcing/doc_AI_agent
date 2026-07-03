@@ -51,6 +51,7 @@ export const createTask = (data: {
   standard: string
   use_rag: boolean
   llm_model: string
+  template_id?: string
   custom_config?: Record<string, unknown>
 }) => api.post('/api/tasks', data)
 
@@ -59,6 +60,7 @@ export const batchCreateTasks = (data: {
   standard: string
   use_rag: boolean
   llm_model: string
+  template_id?: string
   custom_config?: Record<string, unknown>
 }) => api.post('/api/tasks/batch', data)
 
@@ -88,6 +90,46 @@ export const getDownloadUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskI
 export const getMineruDocxDownloadUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/download/mineru-docx`
 
 export const getMineruDocxPreviewUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/preview/mineru-docx`
+
+export const applyTemplateToTask = (taskId: string, data: { template_id?: string; style_config?: Record<string, unknown> }) =>
+  api.post(`/api/tasks/${taskId}/apply-template`, data, { timeout: 120000 })
+
+// ────────── 样式模板 ──────────
+export const uploadTemplate = (file: File) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post('/api/templates/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  })
+}
+
+export const saveTemplate = (data: {
+  name: string
+  style_config: Record<string, unknown>
+  description?: string
+  source_docx_path?: string
+}) => api.post('/api/templates', data)
+
+export const listTemplates = (params?: { page?: number; page_size?: number }) =>
+  api.get('/api/templates', { params })
+
+export const getTemplate = (id: string) => api.get(`/api/templates/${id}`)
+
+export const updateTemplate = (id: string, data: {
+  name?: string
+  style_config?: Record<string, unknown>
+  description?: string
+}) => api.put(`/api/templates/${id}`, data)
+
+export const deleteTemplate = (id: string) => api.delete(`/api/templates/${id}`)
+
+// ────────── 对话排版 ──────────
+export const chatStyle = (data: {
+  message: string
+  current_style_config: Record<string, unknown>
+  context?: string
+}) => api.post('/api/chat/style', data, { timeout: 60000 })
 
 // ────────── 知识库 ──────────
 export const listKbDocuments = (params?: { page?: number; page_size?: number }) =>

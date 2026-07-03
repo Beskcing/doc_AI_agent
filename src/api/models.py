@@ -84,6 +84,7 @@ class CreateTaskRequest(BaseModel):
     standard: str = Field(description="排版规范")
     use_rag: bool = Field(default=True, description="是否使用 RAG")
     llm_model: str = Field(default="qwen-plus", description="LLM 模型")
+    template_id: str | None = Field(default=None, description="样式模板 ID，指定后跳过 LLM 样式提取")
     custom_config: dict[str, Any] | None = Field(default=None, description="自定义配置")
 
 
@@ -130,6 +131,7 @@ class BatchCreateTaskRequest(BaseModel):
     standard: str = Field(description="排版规范")
     use_rag: bool = Field(default=True, description="是否使用 RAG")
     llm_model: str = Field(default="qwen-plus", description="LLM 模型")
+    template_id: str | None = Field(default=None, description="样式模板 ID")
     custom_config: dict[str, Any] | None = Field(default=None, description="自定义配置")
 
 
@@ -156,6 +158,66 @@ class RebuildKbRequest(BaseModel):
     """重建知识库请求"""
 
     force: bool = Field(default=False, description="强制重建")
+
+
+# ────────── 样式模板 ──────────
+class SaveTemplateRequest(BaseModel):
+    """保存样式模板请求"""
+
+    name: str = Field(description="模板名称")
+    style_config: dict[str, Any] = Field(description="样式配置 JSON")
+    description: str | None = Field(default=None, description="模板描述")
+    source_docx_path: str | None = Field(default=None, description="来源 DOCX 路径")
+
+
+class UpdateTemplateRequest(BaseModel):
+    """更新样式模板请求"""
+
+    name: str | None = Field(default=None, description="模板名称")
+    style_config: dict[str, Any] | None = Field(default=None, description="样式配置 JSON")
+    description: str | None = Field(default=None, description="模板描述")
+
+
+class StyleTemplateInfo(BaseModel):
+    """样式模板信息"""
+
+    id: str = Field(description="模板 ID")
+    name: str = Field(description="模板名称")
+    description: str | None = Field(default=None, description="模板描述")
+    style_config: dict[str, Any] = Field(description="样式配置")
+    source_docx_path: str | None = Field(default=None, description="来源 DOCX 路径")
+    created_at: datetime = Field(description="创建时间")
+    updated_at: datetime = Field(description="更新时间")
+
+
+class StyleTemplateListResponse(PaginatedResponse):
+    """样式模板列表响应"""
+
+    items: list[StyleTemplateInfo] = Field(description="模板列表")
+
+
+# ────────── 对话排版 ──────────
+class ChatRequest(BaseModel):
+    """对话排版请求"""
+
+    message: str = Field(description="用户消息")
+    current_style_config: dict[str, Any] = Field(description="当前样式配置")
+    context: str | None = Field(default=None, description="上下文信息（文档类型等）")
+
+
+class ChatResponse(BaseModel):
+    """对话排版响应"""
+
+    reply: str = Field(description="AI 回复")
+    updated_style_config: dict[str, Any] = Field(description="更新后的样式配置")
+
+
+# ────────── 应用模板 ──────────
+class ApplyTemplateRequest(BaseModel):
+    """应用模板到任务请求"""
+
+    template_id: str | None = Field(default=None, description="模板 ID")
+    style_config: dict[str, Any] | None = Field(default=None, description="直接传入样式配置")
 
 
 # ────────── 系统配置 ──────────

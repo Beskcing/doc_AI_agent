@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 
 from src.api.models import (
+    ApplyTemplateRequest,
     BatchCreateTaskRequest,
     CreateTaskRequest,
     ResponseModel,
@@ -50,6 +51,7 @@ async def create_task(request: CreateTaskRequest) -> ResponseModel:
             custom_config={
                 **(request.custom_config or {}),
                 "file_path": file_path,
+                "template_id": request.template_id,
             },
         )
         # 提交异步处理
@@ -88,6 +90,7 @@ async def batch_create_tasks(request: BatchCreateTaskRequest) -> ResponseModel:
                 custom_config={
                     **(request.custom_config or {}),
                     "file_path": file_path,
+                    "template_id": request.template_id,
                 },
             )
             task_manager.submit_task(task.id)
@@ -336,3 +339,39 @@ async def preview_mineru_docx(task_id: str):
         raise HTTPException(status_code=404, detail="MinerU 原始 DOCX 不存在或转换失败")
 
     return HTMLResponse(content=html)
+
+
+@router.post("/{task_id}/apply-template", response_model=ResponseModel)
+async def apply_template_to_task(task_id: str, request: ApplyTemplateRequest) -> ResponseModel:
+    """对已完成任务重新应用样式模板
+
+    接收 template_id 或直接传入 style_config，重新渲染 DOCX。
+    """
+    try:
+        # 确定样式配置
+        if request.template_id:
+            # 从 DB 获取模板
+            from src.db.crud import StyleTemplateCRUD
+            from src.db.database import SessionLocal
+
+            db = SessionLocal()
+            try:
+                template = StyleTemplateCRUD.get(db, request.template_id)
+                if not template:
+                    return ResponseModel(code=404, message="模板不存在")
+                style_config = template.style_config
+            finally:
+                db.close()
+        elif request.style_config:
+            style_config = request.style_config
+        else:
+            return ResponseModel(code=400, message="需提供 template_id 或 style_config")
+
+        result_path = task_manager.apply_template_to_task(task_id, style_config)
+        return ResponseModel(data={
+            "result_path": result_path,
+            "style_config": style_config,
+        })
+    except Exception as e:
+        logger.exception("应用模板失败")
+        return ResponseModel(code=500, message=f"应用模板失败: {e}")
