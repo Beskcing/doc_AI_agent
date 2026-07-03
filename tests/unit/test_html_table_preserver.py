@@ -15,7 +15,7 @@ class TestHTMLTablePreserver:
         result, mapping = self.preserver.protect(md)
 
         assert "<table>" not in result
-        assert "<!-- TABLE_PLACEHOLDER_0 -->" in result
+        assert "@@TABLE_PLACEHOLDER_0@@" in result
         assert len(mapping) == 1
         assert "<table>" in list(mapping.values())[0]
 

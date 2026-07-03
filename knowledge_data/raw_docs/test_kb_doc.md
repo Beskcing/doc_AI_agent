@@ -1,5 +1,3 @@
-# 测试规范文档
+# Test KB Document
 
-## 1 范围
-
-测试内容。
+This is a test knowledge base document for formatting standards.

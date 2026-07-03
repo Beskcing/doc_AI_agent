@@ -589,9 +589,8 @@ class TaskManager:
     def get_docx_html_preview(self, task_id: str) -> str | None:
         """将任务生成的 DOCX 转换为 HTML 供前端预览
 
-        使用 Pandoc 将 DOCX 转换为 HTML fragment，保留表格、图片等格式。
-        不使用 --standalone/--embed-resources，生成轻量 HTML 片段，
-        避免大文件 base64 编码导致内容过重被截断。
+        使用 Pandoc 将 DOCX 转换为 HTML，内嵌图片资源（base64），
+        确保前端 iframe 预览时图片能正确显示。
         """
         task = self.get_task(task_id)
         if not task or not task.result_path:
@@ -603,11 +602,13 @@ class TaskManager:
 
         try:
             import pypandoc
+            # 使用 --standalone --embed-resources 内嵌图片为 base64，
+            # 避免前端 iframe 预览时图片 404
             html = pypandoc.convert_file(
                 str(result_path),
                 "html",
                 format="docx",
-                extra_args=["--wrap=none"],
+                extra_args=["--wrap=none", "--standalone", "--embed-resources"],
             )
             logger.info("任务 %s: DOCX→HTML 预览生成成功, %d 字符", task_id, len(html))
             return html

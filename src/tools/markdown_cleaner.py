@@ -162,6 +162,10 @@ class MarkdownCleaner:
 
         return result, changes
 
+    # LLM 审查的最大文本长度（字符），超过此长度跳过 LLM 审查
+    # 避免 LLM 输出截断导致表格占位符等内容丢失
+    LLM_REVIEW_MAX_CHARS: int = 15000
+
     def llm_review(self, markdown: str, context: IntentAnalysis) -> CleaningResult:
         """LLM 智能审查
 
@@ -169,6 +173,9 @@ class MarkdownCleaner:
         - 专业术语识别错误
         - 内容连贯性问题
         - 需要人工确认的问题标记
+
+        对于超长文档（超过 LLM_REVIEW_MAX_CHARS），跳过 LLM 审查，
+        仅使用规则预处理结果，避免 LLM 输出截断导致表格占位符等内容丢失。
 
         Args:
             markdown: 预处理后的 Markdown
@@ -180,6 +187,31 @@ class MarkdownCleaner:
         if not self.llm_client:
             return CleaningResult(cleaned_markdown=markdown)
 
+        total_len = len(markdown)
+
+        # 超长文档：跳过 LLM 审查，避免输出截断导致内容丢失
+        if total_len > self.LLM_REVIEW_MAX_CHARS:
+            logger.warning(
+                "文档过长 (%d 字符 > %d)，跳过 LLM 审查，仅使用规则预处理",
+                total_len, self.LLM_REVIEW_MAX_CHARS,
+            )
+            return CleaningResult(
+                cleaned_markdown=markdown,
+                changes_log=[f"文档过长（{total_len} 字符），跳过 LLM 审查"],
+            )
+
+        # 包含表格占位符时跳过 LLM 审查，避免 LLM 修改占位符导致表格恢复失败
+        if "@@TABLE_PLACEHOLDER_" in markdown:
+            placeholder_count = markdown.count("@@TABLE_PLACEHOLDER_")
+            logger.warning(
+                "文本包含 %d 个表格占位符，跳过 LLM 审查以保护表格结构",
+                placeholder_count,
+            )
+            return CleaningResult(
+                cleaned_markdown=markdown,
+                changes_log=[f"包含 {placeholder_count} 个表格占位符，跳过 LLM 审查"],
+            )
+
         prompt = self._build_review_prompt(markdown, context)
 
         try:
@@ -190,7 +222,7 @@ class MarkdownCleaner:
 
             return CleaningResult(
                 cleaned_markdown=cleaned,
-                changes_log=[f"LLM 审查完成，标记 {marked_count} 个需人工核对项"],
+                changes_log=[f"LLM 审查完成（{total_len} 字符），标记 {marked_count} 个需人工核对项"],
                 ocr_errors_marked=marked_count,
             )
         except Exception as e:
@@ -440,6 +472,13 @@ class MarkdownCleaner:
 
         for wrong, correct in replacements.items():
             result = result.replace(wrong, correct)
+
+        # 移除 Pandoc 不支持的 \tag{} 命令（公式编号）
+        # Pandoc 的 TeX math 不支持 \tag，会导致渲染警告
+        result = re.sub(r"\\tag\{[^}]*\}", "", result)
+
+        # 移除其他 Pandoc 不支持的 LaTeX 命令
+        result = result.replace(r"\nonumber", "")
 
         return result
 

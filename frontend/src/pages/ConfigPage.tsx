@@ -12,7 +12,13 @@ const ConfigPage: React.FC = () => {
     setLoading(true)
     try {
       const res = await getConfig()
-      form.setFieldsValue(res.data.data)
+      const data = res.data.data
+      // 修复浮点精度问题：四舍五入到合理小数位
+      form.setFieldsValue({
+        ...data,
+        rag_bm25_weight: data.rag_bm25_weight ? Math.round(data.rag_bm25_weight * 100) / 100 : 0,
+        rag_vector_weight: data.rag_vector_weight ? Math.round(data.rag_vector_weight * 100) / 100 : 0,
+      })
     } catch (error: any) {
       message.error(error.message || '获取配置失败')
     } finally {

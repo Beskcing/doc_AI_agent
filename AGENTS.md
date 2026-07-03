@@ -44,3 +44,5 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-03 | fix | Web API 路径接入真实 LLM 调用：新增意图分析/LLM样式提取/RAG检索，替换硬编码模拟数据，启用 Markdown 两阶段 LLM 智能审查 |
 | 2026-07-03 | fix | 修复预览内容截断：完整 cleaned.md 文件持久化，DOCX→HTML 改轻量 fragment，前端移除高度限制 |
 | 2026-07-03 | feat | 新增任务删除、Word 预览（DOCX→HTML iframe）、Markdown 完整渲染（react-markdown + remark-gfm） |
+| 2026-07-03 | fix | 全栈测试修复：RAG raw_docs_dir 属性缺失、HTML 表格占位符被 LLM 清除（改用纯文本标记+跳过含占位符的 LLM 审查）、Pandoc TeX math \tag 不支持、DOCX 预览图片 404（--embed-resources）、前端时间格式化（dayjs）、配置页浮点精度 |
+| 2026-07-03 | fix | 安装 dashscope SDK，RAG 知识库混合检索（BM25+向量）完全打通 |

@@ -9,6 +9,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
+import dayjs from 'dayjs'
 import { getTaskStats } from '../services/api'
 
 interface StatsData {
@@ -85,7 +86,7 @@ const Dashboard: React.FC = () => {
       ),
     },
     { title: '进度', dataIndex: 'progress', key: 'progress', width: 80, render: (v: number) => `${v}%` },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-' },
   ]
 
   return (

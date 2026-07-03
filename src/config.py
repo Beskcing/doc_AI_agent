@@ -62,6 +62,7 @@ class RAGConfig(BaseModel):
 
     chroma_path: str = "knowledge_data/chroma_db"
     collection_name: str = "formatting_standards"
+    raw_docs_dir: str = "knowledge_data/raw_docs"
     chunk_size: int = 700
     chunk_overlap_ratio: float = 0.15
     embedding_provider: str = "dashscope"
@@ -175,10 +176,16 @@ class AppConfig(BaseModel):
             providers=providers,
         )
 
+        # 将 paths.raw_docs_dir 传入 rag 配置，供 KnowledgeBaseManager 使用
+        rag_raw = raw.get("rag", {})
+        paths_raw = raw.get("paths", {})
+        if "raw_docs_dir" not in rag_raw and "raw_docs_dir" in paths_raw:
+            rag_raw["raw_docs_dir"] = paths_raw["raw_docs_dir"]
+
         return cls(
             llm=llm,
-            rag=RAGConfig(**raw.get("rag", {})),
-            paths=PathsConfig(**raw.get("paths", {})),
+            rag=RAGConfig(**rag_raw),
+            paths=PathsConfig(**paths_raw),
             pandoc=PandocConfig(**raw.get("pandoc", {})),
             mineru=MinerUConfig(**raw.get("mineru", {})),
         )

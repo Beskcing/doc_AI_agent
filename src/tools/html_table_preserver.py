@@ -17,11 +17,11 @@ logger = get_logger(__name__)
 class HTMLTablePreserver:
     """HTML 表格占位符保护器"""
 
-    # 占位符格式：<!-- TABLE_PLACEHOLDER_{index} -->
+    # 占位符格式：使用纯文本标记，避免被 LLM 当作 HTML 注释清除
     PLACEHOLDER_PATTERN: ClassVar[re.Pattern] = re.compile(
-        r"<!--\s*TABLE_PLACEHOLDER_(\d+)\s*-->"
+        r"@@TABLE_PLACEHOLDER_(\d+)@@"
     )
-    PLACEHOLDER_TEMPLATE: ClassVar[str] = "<!-- TABLE_PLACEHOLDER_{} -->"
+    PLACEHOLDER_TEMPLATE: ClassVar[str] = "@@TABLE_PLACEHOLDER_{}@@"
 
     # HTML 表格匹配模式（支持嵌套表格）
     TABLE_PATTERN: ClassVar[re.Pattern] = re.compile(

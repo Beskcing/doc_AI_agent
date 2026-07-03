@@ -23,6 +23,7 @@ import {
   FileWordOutlined,
   FileTextOutlined,
 } from '@ant-design/icons'
+import dayjs from 'dayjs'
 import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask } from '../services/api'
 
 interface TaskDetail {
@@ -339,14 +340,14 @@ const TaskDetailPage: React.FC = () => {
             {task.current_step || '-'}
           </Descriptions.Item>
           <Descriptions.Item label="创建时间" span={1}>
-            {task.created_at || '-'}
+            {task.created_at ? dayjs(task.created_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
           </Descriptions.Item>
           <Descriptions.Item label="更新时间" span={1}>
-            {task.updated_at || '-'}
+            {task.updated_at ? dayjs(task.updated_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
           </Descriptions.Item>
           {task.completed_at && (
             <Descriptions.Item label="完成时间" span={3}>
-              {task.completed_at}
+              {dayjs(task.completed_at).format('YYYY-MM-DD HH:mm:ss')}
             </Descriptions.Item>
           )}
           {task.error_message && (

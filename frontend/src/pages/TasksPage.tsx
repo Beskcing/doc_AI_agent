@@ -17,6 +17,7 @@ import {
   EyeOutlined,
   DeleteOutlined,
 } from '@ant-design/icons'
+import dayjs from 'dayjs'
 import type { ColumnsType } from 'antd/es/table'
 import { listTasks, cancelTask, retryTask, deleteTask } from '../services/api'
 
@@ -139,7 +140,7 @@ const TasksPage: React.FC = () => {
           <Progress percent={progress} size="small" />
         ),
     },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-' },
     {
       title: '操作',
       key: 'action',
