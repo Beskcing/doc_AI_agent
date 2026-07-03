@@ -60,6 +60,17 @@
 
 ## 变更记录
 
+### 2026-07-03: fix: Web API 路径接入真实 LLM 调用
+ - **变更文件**：`src/api/services/task_manager.py`
+ - **变更内容**：
+   - 新增 LLM/RAG 懒加载机制（`_get_llm_client`、`_get_retriever`、`_ensure_prompts`）
+   - 新增意图分析方法 `_analyze_intent`：调用 LLM 解析文档类型、适用标准、特殊元素
+   - 重写 `_generate_style_config`：从硬编码模拟数据改为 LLM + RAG 检索生成样式配置，LLM 不可用时降级为默认值
+   - 修改 `_clean_markdown`：传入 `llm_client` 和 `intent` 上下文，启用 Markdown 两阶段清洗中的 LLM 智能审查
+   - 修改 `_process_task` 调用链：在阶段1（MinerU解析）和阶段2（清洗）之间插入阶段1.5（意图分析）
+   - 新增 `_default_style_config` 方法作为 LLM 降级方案
+ - **影响范围**：Web API 的任务处理管线现在与 CLI 管线（`scripts/run_pipeline.py`）保持一致的 LLM 调用链路
+
 ### 2026-07-03: fix: 修复预览内容截断问题
  - **变更文件**：`src/api/services/task_manager.py`、`src/api/routers/tasks.py`、`frontend/src/pages/TaskDetailPage.tsx`、`frontend/src/services/api.ts`
  - **变更内容**：

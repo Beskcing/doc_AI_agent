@@ -19,6 +19,9 @@ from src.config import AppConfig
 from src.db.crud import TaskCRUD
 from src.db.database import SessionLocal
 from src.db.models import TaskModel
+from src.llm_client import LLMClient
+from src.models.document_schema import IntentAnalysis
+from src.utils.json_validator import safe_parse_llm_json
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -38,6 +41,14 @@ class TaskManager:
     _instance: TaskManager | None = None
     _lock = threading.Lock()
 
+    # LLM / RAG 懒加载缓存
+    _llm_client: LLMClient | None = None
+    _retriever = None  # HybridRetriever，延迟导入避免依赖问题
+    _prompts_loaded: bool = False
+    _system_prompt: str = ""
+    _intent_prompt: str = ""
+    _style_prompt: str = ""
+
     def __new__(cls) -> TaskManager:
         if cls._instance is None:
             with cls._lock:
@@ -45,6 +56,133 @@ class TaskManager:
                     cls._instance = super().__new__(cls)
                     cls._instance._executor = ThreadPoolExecutor(max_workers=4)
         return cls._instance
+
+    # ──────── LLM / RAG 懒加载 ────────
+
+    def _get_llm_client(self) -> LLMClient | None:
+        """懒加载 LLM 客户端，初始化失败时返回 None"""
+        if self._llm_client is None:
+            try:
+                self._llm_client = LLMClient(_config.llm)
+                logger.info("LLM 客户端初始化成功: provider=%s", _config.llm.default_provider)
+            except Exception as e:
+                logger.warning("LLM 客户端初始化失败，将使用降级模式: %s", e)
+        return self._llm_client
+
+    def _get_retriever(self):
+        """懒加载 RAG 混合检索器，初始化失败时返回 None"""
+        if self._retriever is None:
+            try:
+                from src.rag.knowledge_base_config import KnowledgeBaseManager
+
+                kb_manager = KnowledgeBaseManager(_config.rag)
+                kb_manager.initialize()
+                self._retriever = kb_manager.get_retriever()
+                logger.info("RAG 知识库加载成功")
+            except Exception as e:
+                logger.warning("RAG 知识库初始化失败，将不使用 RAG: %s", e)
+        return self._retriever
+
+    def _ensure_prompts(self) -> None:
+        """懒加载提示词模板"""
+        if self._prompts_loaded:
+            return
+        prompts_dir = Path(_config.paths.prompts_dir)
+        for name, attr in [
+            ("system_prompt.md", "_system_prompt"),
+            ("intent_parsing_prompt.md", "_intent_prompt"),
+            ("style_extraction_prompt.md", "_style_prompt"),
+        ]:
+            path = prompts_dir / name
+            if path.exists():
+                setattr(self, attr, path.read_text(encoding="utf-8"))
+            else:
+                logger.warning("提示词文件不存在: %s", path)
+        self._prompts_loaded = True
+
+    def _analyze_intent(self, task_id: str, markdown_content: str, target_standard: str = "") -> IntentAnalysis:
+        """意图分析（LLM + RAG）
+
+        LLM 不可用时降级为默认意图。
+
+        Args:
+            task_id: 任务 ID
+            markdown_content: 原始 Markdown
+            target_standard: 用户指定的目标标准
+
+        Returns:
+            IntentAnalysis 意图分析结果
+        """
+        self.update_status(task_id, "processing", progress=15, current_step="analyze_intent")
+
+        llm = self._get_llm_client()
+        self._ensure_prompts()
+
+        # LLM 不可用 → 降级
+        if not llm or not self._intent_prompt:
+            logger.warning("任务 %s: LLM 不可用，使用默认意图", task_id)
+            intent = IntentAnalysis()
+            if target_standard:
+                intent.detected_standard = target_standard
+            return intent
+
+        try:
+            prompt = self._intent_prompt.replace("{markdown_content}", markdown_content[:3000])
+            response = llm.invoke(prompt, self._system_prompt or None)
+
+            try:
+                json_data = safe_parse_llm_json(response)
+                intent = IntentAnalysis.model_validate(json_data)
+            except Exception:
+                logger.warning("任务 %s: 意图解析 JSON 校验失败，使用默认意图", task_id)
+                intent = IntentAnalysis()
+
+            if target_standard:
+                intent.detected_standard = target_standard
+
+            logger.info("任务 %s: 意图分析完成 - 类型=%s, 标准=%s",
+                        task_id, intent.document_type, intent.detected_standard)
+            return intent
+        except Exception as e:
+            logger.error("任务 %s: 意图分析失败: %s", task_id, e)
+            intent = IntentAnalysis()
+            if target_standard:
+                intent.detected_standard = target_standard
+            return intent
+
+    def _default_style_config(self) -> dict:
+        """默认样式配置（LLM 降级用）"""
+        return {
+            "page_layout": {
+                "paper_size": "A4",
+                "margin_top_cm": 3.7,
+                "margin_bottom_cm": 3.5,
+                "margin_left_cm": 2.8,
+                "margin_right_cm": 2.6,
+            },
+            "title": {
+                "font": "方正小标宋简体",
+                "size_pt": 22,
+                "align": "center",
+                "bold": True,
+            },
+            "body": {
+                "font": "仿宋_GB2312",
+                "size_pt": 16,
+                "line_spacing": 1.5,
+                "first_line_indent": 2,
+            },
+            "heading": {
+                "font": "黑体",
+                "size_pt": 16,
+                "bold": True,
+            },
+            "table": {
+                "border_width": 1,
+                "header_bold": True,
+            },
+            "rag_sources": [],
+        }
 
     def create_task(
         self,
@@ -213,6 +351,7 @@ class TaskManager:
                 return
             config = task.config or {}
             file_path = config.get("file_path")
+            target_standard = task.standard or ""
         finally:
             db.close()  # Bug#6 修复：关闭短会话，不在长耗时操作中持有
 
@@ -253,9 +392,12 @@ class TaskManager:
             finally:
                 db.close()
 
-            # ──────── 阶段 2: Markdown 清洗 ────────
+            # ──────── 阶段 1.5: 意图分析（LLM + RAG） ────────
+            intent = self._analyze_intent(task_id, markdown_content, target_standard)
+
+            # ──────── 阶段 2: Markdown 清洗（规则预处理 + LLM 智能审查） ────────
             self.update_status(task_id, "processing", progress=20, current_step="review_content")
-            cleaned_markdown = self._clean_markdown(task_id, markdown_content, extract_dir)
+            cleaned_markdown = self._clean_markdown(task_id, markdown_content, extract_dir, intent=intent)
 
             # 存储完整清洗后的 Markdown（供预览使用）
             # 同时写入文件和数据库，文件作为降级回读数据源
@@ -273,8 +415,8 @@ class TaskManager:
             finally:
                 db.close()
 
-            # ──────── 阶段 2.5: 生成样式配置 ────────
-            style_config = self._generate_style_config(task_id, cleaned_markdown)
+            # ──────── 阶段 2.5: 样式提取（LLM + RAG） ────────
+            style_config = self._generate_style_config(task_id, cleaned_markdown, intent)
 
             # ──────── 阶段 3: Pandoc 转换 → DOCX ────────
             self.update_status(task_id, "processing", progress=40, current_step="render_docx")
@@ -305,43 +447,68 @@ class TaskManager:
             logger.exception("任务 %s 处理失败", task_id)
             self.update_status(task_id, "failed", error_message=str(e))
 
-    def _generate_style_config(self, task_id: str, markdown_content: str) -> dict:
-        """生成基本样式配置（模拟 LLM 样式提取）
+    def _generate_style_config(self, task_id: str, markdown_content: str, intent: IntentAnalysis) -> dict:
+        """使用 LLM + RAG 生成样式配置
 
-        实际项目中应由 LLM 根据 RAG 检索结果生成。
+        LLM 不可用时降级为默认样式配置。
+
+        Args:
+            task_id: 任务 ID
+            markdown_content: 清洗后的 Markdown（用于上下文参考）
+            intent: 意图分析结果
+
+        Returns:
+            样式配置字典
         """
-        return {
-            "page_layout": {
-                "paper_size": "A4",
-                "margin_top_cm": 3.7,
-                "margin_bottom_cm": 3.5,
-                "margin_left_cm": 2.8,
-                "margin_right_cm": 2.6,
-            },
-            "title": {
-                "font": "方正小标宋简体",
-                "size_pt": 22,
-                "align": "center",
-                "bold": True,
-            },
-            "body": {
-                "font": "仿宋_GB2312",
-                "size_pt": 16,
-                "line_spacing": 1.5,
-                "first_line_indent": 2,
-            },
-            "heading": {
-                "font": "黑体",
-                "size_pt": 16,
-                "bold": True,
-            },
-            "table": {
-                "border_width": 1,
-                "header_bold": True,
-                "rag_note": "依据检索到的复杂表格规范，表头需加粗且边框设为1pt",
-            },
-            "rag_sources": ["国标排版规范_v2.0_第3章"],
-        }
+        self.update_status(task_id, "processing", progress=30, current_step="extract_style")
+
+        llm = self._get_llm_client()
+        self._ensure_prompts()
+        retriever = self._get_retriever()
+
+        # LLM 不可用 → 降级
+        if not llm or not self._style_prompt:
+            logger.warning("任务 %s: LLM 不可用，使用默认样式配置", task_id)
+            return self._default_style_config()
+
+        try:
+            # RAG 检索排版规范
+            rag_context = "无 RAG 检索结果，请使用国标默认值。"
+            rag_sources = []
+            if retriever:
+                query = f"{intent.document_type} {intent.detected_standard or ''} 排版规范"
+                results = retriever.retrieve(query)
+                if results:
+                    rag_context = "\n\n".join(r.content for r in results[:5])
+                    rag_sources = [f"{r.source} ({r.section})" for r in results]
+
+            # 构建特殊元素描述
+            special = []
+            if intent.has_complex_tables:
+                special.append("包含复杂表格")
+            if intent.has_formulas:
+                special.append("包含数学公式")
+            if intent.has_chemical_structures:
+                special.append("包含化学结构式")
+
+            # 填充提示词模板
+            prompt = self._style_prompt.replace("{document_type}", intent.document_type or "通用文档")
+            prompt = prompt.replace("{detected_standard}", intent.detected_standard or "GB/T 9704")
+            prompt = prompt.replace("{special_elements}", "、".join(special) if special else "无特殊元素")
+            prompt = prompt.replace("{rag_context}", rag_context)
+
+            response = llm.invoke(prompt, self._system_prompt or None)
+            json_data = safe_parse_llm_json(response)
+
+            # 补充 RAG 来源
+            if rag_sources:
+                json_data["rag_sources"] = rag_sources
+
+            logger.info("任务 %s: LLM 样式提取成功", task_id)
+            return json_data
+        except Exception as e:
+            logger.error("任务 %s: LLM 样式提取失败，降级为默认配置: %s", task_id, e)
+            return self._default_style_config()
 
     def _parse_with_mineru(self, task_id: str, file_path: str) -> tuple[str, str]:
         """使用 MinerU 解析 PDF 文件
@@ -450,13 +617,24 @@ class TaskManager:
 
     # ──────── 管线辅助方法 ────────
 
-    def _clean_markdown(self, task_id: str, markdown_content: str, extract_dir: str) -> str:
-        """清洗 Markdown：修复 OCR 错误、校验图片路径、HTML 表格→Pipe 转换
+    def _clean_markdown(
+        self,
+        task_id: str,
+        markdown_content: str,
+        extract_dir: str,
+        intent: IntentAnalysis | None = None,
+    ) -> str:
+        """清洗 Markdown：规则预处理 + LLM 智能审查 + HTML 表格→Pipe 转换
+
+        两阶段清洗：
+        1. pre_clean: 规则化预处理（全角转半角、断行修复、乱码清理等）
+        2. llm_review: LLM 智能审查（语义级 OCR 错误修复）
 
         Args:
             task_id: 任务 ID
             markdown_content: MinerU 输出的原始 Markdown
             extract_dir: MinerU 解压目录（图片等资源所在位置）
+            intent: 意图分析结果（用于 LLM 审查上下文）
 
         Returns:
             清洗后的 Markdown（管道表格格式）
@@ -467,9 +645,9 @@ class TaskManager:
         # 1. 插入图片引用（从 content_list.json 提取表格图片路径）
         markdown_content = self._insert_image_refs(markdown_content, extract_dir)
 
-        # 2. Markdown 规则化清洗
-        cleaner = MarkdownCleaner(base_dir=extract_dir)
-        result = cleaner.clean(markdown_content)
+        # 2. Markdown 两阶段清洗（规则预处理 + LLM 智能审查）
+        cleaner = MarkdownCleaner(llm_client=self._get_llm_client(), base_dir=extract_dir)
+        result = cleaner.clean(markdown_content, context=intent)
         cleaned = result.cleaned_markdown
 
         # 3. HTML 表格 → Markdown 管道表格（Pandoc raw_html 不转为 DOCX 表格）
