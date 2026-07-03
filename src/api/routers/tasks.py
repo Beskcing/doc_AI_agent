@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from src.api.models import (
     CreateTaskRequest,
@@ -138,6 +138,14 @@ async def retry_task(task_id: str) -> ResponseModel:
         return ResponseModel(code=500, message=f"重试失败: {e}")
 
 
+@router.delete("/{task_id}", response_model=ResponseModel)
+async def delete_task(task_id: str) -> ResponseModel:
+    """删除任务"""
+    if task_manager.delete_task(task_id):
+        return ResponseModel(data={"deleted": True})
+    return ResponseModel(code=400, message="任务不存在或正在处理中，无法删除")
+
+
 @router.get("/{task_id}/download", response_model=ResponseModel)
 async def download_result(task_id: str) -> ResponseModel:
     """获取下载信息"""
@@ -201,3 +209,19 @@ async def preview_result(task_id: str) -> ResponseModel:
             "style_config": task.style_config_preview,
         },
     )
+
+
+@router.get("/{task_id}/preview/docx")
+async def preview_docx(task_id: str):
+    """预览 Word 文档（返回 HTML）"""
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.status != "completed":
+        raise HTTPException(status_code=400, detail="任务尚未完成")
+
+    html = task_manager.get_docx_html_preview(task_id)
+    if not html:
+        raise HTTPException(status_code=404, detail="Word 文件不存在或转换失败")
+
+    return HTMLResponse(content=html)

@@ -13,13 +13,17 @@ import {
   Tabs,
   Empty,
 } from 'antd'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   ArrowLeftOutlined,
   DownloadOutlined,
   EyeOutlined,
   ReloadOutlined,
+  FileWordOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons'
-import { getTask, previewTask, getDownloadUrl, retryTask } from '../services/api'
+import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask } from '../services/api'
 
 interface TaskDetail {
   id: string
@@ -62,12 +66,42 @@ const WORKFLOW_STEPS = [
   { key: 'render_docx', label: '生成 Word 文档' },
 ]
 
+const markdownComponents = {
+  table: ({ node, ...props }: any) => (
+    <table style={{ borderCollapse: 'collapse', width: '100%', margin: '12px 0' }} {...props} />
+  ),
+  th: ({ node, ...props }: any) => (
+    <th style={{ border: '1px solid #d9d9d9', padding: '8px 12px', background: '#fafafa', textAlign: 'left' }} {...props} />
+  ),
+  td: ({ node, ...props }: any) => (
+    <td style={{ border: '1px solid #d9d9d9', padding: '8px 12px' }} {...props} />
+  ),
+  img: ({ node, ...props }: any) => (
+    <img style={{ maxWidth: '100%', margin: '8px 0' }} {...props} />
+  ),
+  code: ({ node, inline, ...props }: any) => (
+    <code
+      style={{
+        background: '#f5f5f5',
+        padding: inline ? '2px 6px' : '12px',
+        borderRadius: 4,
+        fontSize: 13,
+        display: inline ? 'inline' : 'block',
+        overflow: 'auto',
+      }}
+      {...props}
+    />
+  ),
+}
+
 const TaskDetailPage: React.FC = () => {
   const { taskId } = useParams<{ taskId: string }>()
   const [task, setTask] = useState<TaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [preview, setPreview] = useState<{ markdown_preview: string; style_config: Record<string, unknown> } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState('timeline')
+  const [docxPreviewLoaded, setDocxPreviewLoaded] = useState(false)
   const [retrying, setRetrying] = useState(false)
 
   const fetchTask = useCallback(async () => {
@@ -146,6 +180,105 @@ const TaskDetailPage: React.FC = () => {
     return { color, children: step.label }
   })
 
+  const tabItems = [
+    {
+      key: 'timeline',
+      label: '处理流程',
+      children: (
+        <Card>
+          <Timeline items={timelineItems} />
+        </Card>
+      ),
+    },
+    {
+      key: 'markdown',
+      label: <span><FileTextOutlined /> Markdown 预览</span>,
+      children: preview ? (
+        <Card loading={previewLoading}>
+          <div style={{
+            maxHeight: 700,
+            overflow: 'auto',
+            padding: '8px 16px',
+          }}>
+            {preview.markdown_preview ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                {preview.markdown_preview}
+              </ReactMarkdown>
+            ) : (
+              <Empty description="(无预览内容)" />
+            )}
+          </div>
+          {preview.style_config && (
+            <div style={{ marginTop: 16 }}>
+              <h4>样式配置</h4>
+              <pre style={{
+                background: '#f5f5f5',
+                padding: 16,
+                borderRadius: 8,
+                fontSize: 13,
+                maxHeight: 300,
+                overflow: 'auto',
+              }}>
+                {JSON.stringify(preview.style_config, null, 2)}
+              </pre>
+            </div>
+          )}
+        </Card>
+      ) : (
+        <Card>
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <Button icon={<EyeOutlined />} onClick={fetchPreview} loading={previewLoading}>
+              加载 Markdown 预览
+            </Button>
+          </div>
+        </Card>
+      ),
+    },
+  ]
+
+  // 已完成的任务添加 Word 预览 Tab
+  if (task.status === 'completed') {
+    tabItems.push({
+      key: 'docx',
+      label: <span><FileWordOutlined /> Word 预览</span>,
+      children: (
+        <Card>
+          <div style={{ textAlign: 'center', marginBottom: 16 }}>
+            <Space>
+              <Button
+                icon={<EyeOutlined />}
+                onClick={() => setDocxPreviewLoaded(true)}
+                type="primary"
+              >
+                {docxPreviewLoaded ? '刷新预览' : '加载 Word 预览'}
+              </Button>
+              <Button icon={<DownloadOutlined />} onClick={handleDownload}>
+                下载 Word 文件
+              </Button>
+            </Space>
+          </div>
+          {docxPreviewLoaded && (
+            <div style={{
+              border: '1px solid #d9d9d9',
+              borderRadius: 8,
+              overflow: 'hidden',
+            }}>
+              <iframe
+                src={getDocxPreviewUrl(taskId!)}
+                style={{
+                  width: '100%',
+                  height: '70vh',
+                  border: 'none',
+                }}
+                title="Word 文档预览"
+              />
+            </div>
+          )}
+        </Card>
+      ),
+    })
+  }
+
   return (
     <div>
       <Space style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between' }}>
@@ -158,7 +291,14 @@ const TaskDetailPage: React.FC = () => {
         <Space>
           {task.status === 'completed' && (
             <>
-              <Button icon={<EyeOutlined />} onClick={fetchPreview} loading={previewLoading}>
+              <Button
+                icon={<EyeOutlined />}
+                onClick={() => {
+                  fetchPreview()
+                  setActiveTab('markdown')
+                }}
+                loading={previewLoading}
+              >
                 预览结果
               </Button>
               <Button type="primary" icon={<DownloadOutlined />} onClick={handleDownload}>
@@ -218,59 +358,7 @@ const TaskDetailPage: React.FC = () => {
         </Descriptions>
       </Card>
 
-      <Tabs
-        items={[
-          {
-            key: 'timeline',
-            label: '处理流程',
-            children: (
-              <Card>
-                <Timeline items={timelineItems} />
-              </Card>
-            ),
-          },
-          {
-            key: 'preview',
-            label: 'Markdown 预览',
-            children: preview ? (
-              <Card>
-                <pre style={{
-                  maxHeight: 500,
-                  overflow: 'auto',
-                  background: '#f5f5f5',
-                  padding: 16,
-                  borderRadius: 8,
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                }}>
-                  {preview.markdown_preview || '(无预览内容)'}
-                </pre>
-                {preview.style_config && (
-                  <div style={{ marginTop: 16 }}>
-                    <h4>样式配置</h4>
-                    <pre style={{
-                      background: '#f5f5f5',
-                      padding: 16,
-                      borderRadius: 8,
-                      fontSize: 13,
-                    }}>
-                      {JSON.stringify(preview.style_config, null, 2)}
-                    </pre>
-                  </div>
-                )}
-              </Card>
-            ) : (
-              <Card>
-                <div style={{ textAlign: 'center', padding: 40 }}>
-                  <Button icon={<EyeOutlined />} onClick={fetchPreview} loading={previewLoading}>
-                    加载预览
-                  </Button>
-                </div>
-              </Card>
-            ),
-          },
-        ]}
-      />
+      <Tabs items={tabItems} activeKey={activeTab} onChange={setActiveTab} />
     </div>
   )
 }

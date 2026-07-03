@@ -15,9 +15,10 @@ import {
   ReloadOutlined,
   RetweetOutlined,
   EyeOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { listTasks, cancelTask, retryTask } from '../services/api'
+import { listTasks, cancelTask, retryTask, deleteTask } from '../services/api'
 
 interface TaskItem {
   id: string
@@ -92,6 +93,16 @@ const TasksPage: React.FC = () => {
     }
   }
 
+  const handleDelete = async (taskId: string) => {
+    try {
+      await deleteTask(taskId)
+      message.success('任务已删除')
+      fetchTasks(pagination.current, pagination.pageSize, statusFilter)
+    } catch (error: any) {
+      message.error(error.message || '删除失败')
+    }
+  }
+
   const columns: ColumnsType<TaskItem> = [
     {
       title: '文件名',
@@ -132,7 +143,7 @@ const TasksPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 220,
+      width: 280,
       render: (_, record: TaskItem) => (
         <Space size="small">
           <Link to={`/tasks/${record.id}`}>
@@ -156,6 +167,13 @@ const TasksPage: React.FC = () => {
             >
               重试
             </Button>
+          )}
+          {record.status !== 'processing' && (
+            <Popconfirm title="确认删除该任务？" onConfirm={() => handleDelete(record.id)}>
+              <Button type="link" danger size="small" icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
           )}
         </Space>
       ),

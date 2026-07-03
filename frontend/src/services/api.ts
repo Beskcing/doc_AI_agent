@@ -56,7 +56,11 @@ export const cancelTask = (taskId: string) => api.post(`/api/tasks/${taskId}/can
 
 export const retryTask = (taskId: string) => api.post(`/api/tasks/${taskId}/retry`)
 
+export const deleteTask = (taskId: string) => api.delete(`/api/tasks/${taskId}`)
+
 export const previewTask = (taskId: string) => api.get(`/api/tasks/${taskId}/preview`)
+
+export const getDocxPreviewUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/preview/docx`
 
 export const getTaskStats = () => api.get('/api/tasks/stats')
 

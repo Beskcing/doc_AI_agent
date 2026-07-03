@@ -150,6 +150,35 @@ class TaskManager:
         finally:
             db.close()
 
+    def delete_task(self, task_id: str) -> bool:
+        """删除任务
+
+        删除数据库记录并清理关联的输出文件。
+        处理中（processing）的任务不允许删除，需先取消。
+        """
+        db = _get_db()
+        try:
+            task = TaskCRUD.get(db, task_id)
+            if not task:
+                return False
+            if task.status == "processing":
+                # 处理中的任务不允许直接删除
+                return False
+
+            # 清理输出目录
+            output_dir = Path("data/output") / task_id
+            if output_dir.exists():
+                import shutil
+                shutil.rmtree(output_dir, ignore_errors=True)
+                logger.info("任务 %s: 已清理输出目录 %s", task_id, output_dir)
+
+            # 删除数据库记录
+            TaskCRUD.delete(db, task_id)
+            logger.info("任务 %s: 已删除", task_id)
+            return True
+        finally:
+            db.close()
+
     def get_stats(self) -> dict[str, int]:
         """获取任务统计"""
         db = _get_db()
@@ -219,7 +248,7 @@ class TaskManager:
                 )
                 task_db = TaskCRUD.get(db, task_id)
                 if task_db:
-                    task_db.cleaned_markdown_preview = markdown_content[:2000]
+                    task_db.cleaned_markdown_preview = markdown_content
                     db.commit()
             finally:
                 db.close()
@@ -227,6 +256,16 @@ class TaskManager:
             # ──────── 阶段 2: Markdown 清洗 ────────
             self.update_status(task_id, "processing", progress=20, current_step="review_content")
             cleaned_markdown = self._clean_markdown(task_id, markdown_content, extract_dir)
+
+            # 存储完整清洗后的 Markdown（供预览使用）
+            db = _get_db()
+            try:
+                task_db = TaskCRUD.get(db, task_id)
+                if task_db:
+                    task_db.cleaned_markdown_preview = cleaned_markdown
+                    db.commit()
+            finally:
+                db.close()
 
             # ──────── 阶段 2.5: 生成样式配置 ────────
             style_config = self._generate_style_config(task_id, cleaned_markdown)
@@ -373,6 +412,33 @@ class TaskManager:
             "result_json_path": task.result_json_path,
         })
         return info
+
+    def get_docx_html_preview(self, task_id: str) -> str | None:
+        """将任务生成的 DOCX 转换为 HTML 供前端预览
+
+        使用 Pandoc 将 DOCX 转换为 HTML，保留表格、图片等格式。
+        """
+        task = self.get_task(task_id)
+        if not task or not task.result_path:
+            return None
+
+        result_path = Path(task.result_path)
+        if not result_path.exists():
+            return None
+
+        try:
+            import pypandoc
+            html = pypandoc.convert_file(
+                str(result_path),
+                "html",
+                format="docx",
+                extra_args=["--standalone", "--embed-resources"],
+            )
+            logger.info("任务 %s: DOCX→HTML 预览生成成功, %d 字符", task_id, len(html))
+            return html
+        except Exception as e:
+            logger.error("任务 %s: DOCX→HTML 转换失败: %s", task_id, e)
+            return None
 
     # ──────── 管线辅助方法 ────────
 

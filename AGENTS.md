@@ -51,6 +51,12 @@
 5. 文档同步更新：
  - 行为或工具链发生变更时，必须同步更新 `AGENTS.md` 和相关文档。
  - 新增的排版规则需同步更新至 RAG 知识库。
+6. Git 提交规范（强制执行）：
+ - **每次代码变更完成后，必须使用 `git add -A` + `git commit` 提交代码。**
+ - **每次提交后，必须同步更新 `AGENTS.md`（记录变更内容、新增文件、接口变动等）。**
+ - 提交信息使用 `feat:` / `fix:` / `refactor:` / `docs:` 前缀，简要描述变更内容。
+ - 远程仓库地址：`https://github.com/Beskcing/doc_AI_agent.git`
+ - 提交后执行 `git push origin master` 推送到远程仓库。
 
 ## Definition of Done (完成标准)
  一个功能被视为"完成"，必须满足：
