@@ -76,13 +76,14 @@ async def upload_kb_document(file: UploadFile = File(...)) -> ResponseModel:
 
         db = SessionLocal()
         try:
+            # BUG 修复：上传时状态为 pending，需重建索引后才会变为 indexed
             doc = KbDocumentCRUD.create(
                 db,
                 name=original_name,
                 source=str(file_path),
-                status="indexed",
+                status="pending",
             )
-            return ResponseModel(data={"uploaded": str(file_path), "name": doc.name, "id": doc.id})
+            return ResponseModel(data={"uploaded": str(file_path), "name": doc.name, "id": doc.id, "status": "pending"})
         finally:
             db.close()
     except Exception as e:
@@ -143,23 +144,40 @@ async def rebuild_kb_index() -> ResponseModel:
         retriever = kb_manager.get_retriever()
         doc_count = len(retriever.documents) if hasattr(retriever, "documents") else 0
 
-        # 同步 DB 记录：确保 raw_docs 中的文件都有 DB 记录
+        # 同步 DB 记录：确保 raw_docs 中的文件都有 DB 记录，并更新 chunk_count
         db = SessionLocal()
         try:
             from src.db.models import KbDocumentModel
             raw_dir = Path(config.paths.raw_docs_dir)
             if raw_dir.exists():
+                # 统计每个文件的 chunk 数量
+                chunk_map = {}
+                if hasattr(retriever, 'documents'):
+                    for doc in retriever.documents:
+                        # Document 对象的 source 在 metadata 中
+                        src = doc.metadata.get('source', '') if hasattr(doc, 'metadata') else ''
+                        if src:
+                            # 从 source 路径提取文件名
+                            src_name = Path(src).name
+                            chunk_map[src_name] = chunk_map.get(src_name, 0) + 1
+
                 for f in raw_dir.glob("*.md"):
                     existing = db.query(KbDocumentModel).filter(
                         KbDocumentModel.source == str(f)
                     ).first()
+                    chunk_count = chunk_map.get(f.name, 0)
                     if not existing:
                         new_doc = KbDocumentModel(
                             name=f.name,
                             source=str(f),
                             status="indexed",
+                            chunk_count=chunk_count,
                         )
                         db.add(new_doc)
+                    else:
+                        # BUG 修复：更新已有文档的 chunk_count
+                        existing.chunk_count = chunk_count
+                        existing.status = "indexed"
                 db.commit()
         finally:
             db.close()

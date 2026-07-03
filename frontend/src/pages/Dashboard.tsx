@@ -36,21 +36,21 @@ const Dashboard: React.FC = () => {
   const [data, setData] = useState<StatsData | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
+  const fetchData = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoading(true)
     try {
       const res = await getTaskStats()
       setData(res.data.data)
     } catch {
       // 静默失败
     } finally {
-      setLoading(false)
+      if (showLoading) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 10000)
+    fetchData(true) // 首次加载显示 loading
+    const interval = setInterval(() => fetchData(false), 10000) // 轮询不显示 loading
     return () => clearInterval(interval)
   }, [fetchData])
 
@@ -94,7 +94,7 @@ const Dashboard: React.FC = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <h2 style={{ margin: 0 }}>工作台</h2>
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
+          <Button icon={<ReloadOutlined />} onClick={() => fetchData(true)} loading={loading}>
             刷新
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/upload')}>

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse
 
 from src.api.models import (
@@ -307,13 +308,11 @@ async def preview_result(task_id: str) -> ResponseModel:
         cleaned_md_path = Path("data/output") / task_id / "cleaned.md"
         if cleaned_md_path.exists():
             markdown_preview = cleaned_md_path.read_text(encoding="utf-8")
-            # 同步更新数据库
-            task.cleaned_markdown_preview = markdown_preview
+            # 同步更新数据库（BUG 修复：移除不必要的 update_status 空操作调用）
             from src.db.database import SessionLocal
             db = SessionLocal()
             try:
                 from src.db.crud import TaskCRUD
-                TaskCRUD.update_status(db, task_id)  # 触发更新
                 t = TaskCRUD.get(db, task_id)
                 if t:
                     t.cleaned_markdown_preview = markdown_preview
@@ -338,7 +337,8 @@ async def preview_docx(task_id: str):
     if task.status != "completed":
         raise HTTPException(status_code=400, detail="任务尚未完成")
 
-    html = task_manager.get_docx_html_preview(task_id)
+    # BUG 修复：在线程池中执行 Pandoc 转换，避免阻塞事件循环
+    html = await run_in_threadpool(task_manager.get_docx_html_preview, task_id)
     if not html:
         raise HTTPException(status_code=404, detail="Word 文件不存在或转换失败")
 
@@ -357,7 +357,8 @@ async def preview_mineru_docx(task_id: str):
     if task.status != "completed":
         raise HTTPException(status_code=400, detail="任务尚未完成")
 
-    html = task_manager.get_mineru_docx_html_preview(task_id)
+    # BUG 修复：在线程池中执行 Pandoc 转换，避免阻塞事件循环
+    html = await run_in_threadpool(task_manager.get_mineru_docx_html_preview, task_id)
     if not html:
         raise HTTPException(status_code=404, detail="MinerU 原始 DOCX 不存在或转换失败")
 
@@ -390,7 +391,10 @@ async def apply_template_to_task(task_id: str, request: ApplyTemplateRequest) ->
         else:
             return ResponseModel(code=400, message="需提供 template_id 或 style_config")
 
-        result_path = task_manager.apply_template_to_task(task_id, style_config)
+        # BUG 修复：在线程池中执行样式渲染，避免阻塞事件循环
+        result_path = await run_in_threadpool(
+            task_manager.apply_template_to_task, task_id, style_config
+        )
         return ResponseModel(data={
             "result_path": result_path,
             "style_config": style_config,

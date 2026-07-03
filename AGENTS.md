@@ -52,3 +52,4 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-03 | fix | Loop Engineering 全面测试修复6个Bug：Bug#1上传原始文件名丢失(改用.meta元数据文件)、Bug#2知识库同名文件覆盖(改用UUID存储)、Bug#3知识库删除不清理物理文件、Bug#4知识库重建索引空操作(接入真实KB初始化)、Bug#5任务列表轮询间隔不随状态变化、Bug#6任务详情终态后仍高频轮询+下载文件名修复 |
 | 2026-07-03 | feat | 新增多轮对话+上下文窗口管理：ChatSession/ChatMessage DB持久化、会话CRUD API、LLMClient多轮消息支持、上下文窗口状态压缩法(最近N轮+token预算截断)、前端会话列表侧栏+历史恢复+新建/切换/删除会话 |
 | 2026-07-03 | feat | 全面增强DOCX样式提取：读取doc.styles样式定义表作为基线、修复东亚字体提取路径(rPr/rFonts)、多段落采样取最常见样式、完整表格边框(6边)/对齐/背景色/四边内边距/表头跨页重复/垂直对齐、新增list_style/footnote_style/caption_style/header_footer_style提取、段落格式新增左右缩进/keep_together/widow_control/行距类型 |
+| 2026-07-03 | fix | Loop Engineering 全面功能测试修复6个Bug：Bug#1 apply-template/DOCX预览同步阻塞FastAPI事件循环(改用run_in_threadpool)、Bug#2 KB文档chunk_count始终为0(从retriever.documents metadata统计)、Bug#3 KB上传文档status误设为indexed(改为pending)、Bug#4 Dashboard每次轮询显示loading闪烁(仅首次加载显示)、Bug#5 preview端点不必要的update_status空调用(移除) |
