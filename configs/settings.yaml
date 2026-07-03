@@ -44,7 +44,7 @@ mineru:
   # api_token 通过 .env 文件中的 MINERU_API_TOKEN 设置
   base_url: "https://mineru.net"
   model_version: "vlm"         # pipeline / vlm / MinerU-HTML
-  is_ocr: false
+  is_ocr: true
   enable_formula: true
   enable_table: true
   language: "ch"

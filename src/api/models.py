@@ -70,6 +70,12 @@ class UploadResponse(BaseModel):
     content_type: str = Field(description="文件类型")
 
 
+class BatchUploadResponse(BaseModel):
+    """批量上传响应"""
+
+    results: list[UploadResponse] = Field(description="上传结果列表")
+
+
 # ────────── 任务 ──────────
 class CreateTaskRequest(BaseModel):
     """创建任务请求"""
@@ -108,6 +114,23 @@ class TaskListResponse(PaginatedResponse):
     """任务列表响应"""
 
     items: list[TaskInfo] = Field(description="任务列表")
+
+
+class BatchTaskItem(BaseModel):
+    """批量任务项"""
+
+    upload_id: str = Field(description="上传文件 ID")
+    filename: str = Field(description="原始文件名")
+
+
+class BatchCreateTaskRequest(BaseModel):
+    """批量创建任务请求"""
+
+    items: list[BatchTaskItem] = Field(description="任务项列表")
+    standard: str = Field(description="排版规范")
+    use_rag: bool = Field(default=True, description="是否使用 RAG")
+    llm_model: str = Field(default="qwen-plus", description="LLM 模型")
+    custom_config: dict[str, Any] | None = Field(default=None, description="自定义配置")
 
 
 # ────────── 知识库 ──────────

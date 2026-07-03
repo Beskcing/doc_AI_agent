@@ -24,7 +24,7 @@ import {
   FileTextOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl } from '../services/api'
+import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl } from '../services/api'
 
 interface TaskDetail {
   id: string
@@ -64,8 +64,8 @@ const WORKFLOW_STEPS = [
   { key: 'analyze_intent', label: '分析文档意图' },
   { key: 'review_content', label: '审查 Markdown 内容' },
   { key: 'extract_style', label: '提取排版样式' },
-  { key: 'validate_output', label: '校验输出' },
-  { key: 'render_docx', label: '生成 Word 文档' },
+  { key: 'prepare_docx', label: '准备基础 DOCX' },
+  { key: 'apply_style', label: '应用国标样式' },
 ]
 
 const markdownComponents = {
@@ -104,6 +104,7 @@ const TaskDetailPage: React.FC = () => {
   const [previewLoading, setPreviewLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('timeline')
   const [docxPreviewLoaded, setDocxPreviewLoaded] = useState(false)
+  const [mineruDocxPreviewLoaded, setMineruDocxPreviewLoaded] = useState(false)
   const [retrying, setRetrying] = useState(false)
 
   const fetchTask = useCallback(async () => {
@@ -243,9 +244,54 @@ const TaskDetailPage: React.FC = () => {
 
   // 已完成的任务添加 Word 预览 Tab
   if (task.status === 'completed') {
+    // MinerU 原始 DOCX 预览（仅当 MinerU DOCX 可用时显示）
+    if (task.mineru_docx_available) {
+      tabItems.push({
+        key: 'mineru_docx',
+        label: <span><FileWordOutlined /> MinerU 原始 DOCX</span>,
+        children: (
+          <Card>
+            <div style={{ textAlign: 'center', marginBottom: 16 }}>
+              <Space>
+                <Button
+                  icon={<EyeOutlined />}
+                  onClick={() => setMineruDocxPreviewLoaded(true)}
+                  type="primary"
+                >
+                  {mineruDocxPreviewLoaded ? '刷新预览' : '加载 MinerU DOCX 预览'}
+                </Button>
+                <Button icon={<DownloadOutlined />} onClick={handleMineruDocxDownload}>
+                  下载 MinerU DOCX
+                </Button>
+              </Space>
+            </div>
+            {mineruDocxPreviewLoaded && (
+              <div style={{
+                border: '1px solid #d9d9d9',
+                borderRadius: 8,
+                overflow: 'hidden',
+              }}>
+                <iframe
+                  src={getMineruDocxPreviewUrl(taskId!)}
+                  style={{
+                    width: '100%',
+                    height: 'calc(100vh - 200px)',
+                    minHeight: 600,
+                    border: 'none',
+                  }}
+                  title="MinerU 原始 DOCX 预览"
+                />
+              </div>
+            )}
+          </Card>
+        ),
+      })
+    }
+
+    // 最终样式化后的 Word 预览
     tabItems.push({
       key: 'docx',
-      label: <span><FileWordOutlined /> Word 预览</span>,
+      label: <span><FileWordOutlined /> 排版后 Word 预览</span>,
       children: (
         <Card>
           <div style={{ textAlign: 'center', marginBottom: 16 }}>
@@ -258,7 +304,7 @@ const TaskDetailPage: React.FC = () => {
                 {docxPreviewLoaded ? '刷新预览' : '加载 Word 预览'}
               </Button>
               <Button icon={<DownloadOutlined />} onClick={handleDownload}>
-                下载 Word 文件
+                下载排版后 Word
               </Button>
             </Space>
           </div>
@@ -276,7 +322,7 @@ const TaskDetailPage: React.FC = () => {
                   minHeight: 600,
                   border: 'none',
                 }}
-                title="Word 文档预览"
+                title="排版后 Word 文档预览"
               />
             </div>
           )}

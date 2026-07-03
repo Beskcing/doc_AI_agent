@@ -36,6 +36,15 @@ export const uploadFile = (file: File) => {
   })
 }
 
+export const batchUploadFiles = (files: File[]) => {
+  const formData = new FormData()
+  files.forEach((file) => formData.append('files', file))
+  return api.post('/api/upload/batch', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  })
+}
+
 // ────────── 任务 ──────────
 export const createTask = (data: {
   upload_id: string
@@ -44,6 +53,14 @@ export const createTask = (data: {
   llm_model: string
   custom_config?: Record<string, unknown>
 }) => api.post('/api/tasks', data)
+
+export const batchCreateTasks = (data: {
+  items: Array<{ upload_id: string; filename: string }>
+  standard: string
+  use_rag: boolean
+  llm_model: string
+  custom_config?: Record<string, unknown>
+}) => api.post('/api/tasks/batch', data)
 
 export const listTasks = (params: { page?: number; page_size?: number; status?: string }) =>
   api.get('/api/tasks', { params })
@@ -69,6 +86,8 @@ export const getDownloadInfo = (taskId: string) => api.get(`/api/tasks/${taskId}
 export const getDownloadUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/download/file`
 
 export const getMineruDocxDownloadUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/download/mineru-docx`
+
+export const getMineruDocxPreviewUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/preview/mineru-docx`
 
 // ────────── 知识库 ──────────
 export const listKbDocuments = (params?: { page?: number; page_size?: number }) =>

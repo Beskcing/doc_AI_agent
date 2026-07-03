@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 
 from src.api.models import (
+    BatchCreateTaskRequest,
     CreateTaskRequest,
     ResponseModel,
     TaskListResponse,
@@ -57,6 +58,45 @@ async def create_task(request: CreateTaskRequest) -> ResponseModel:
     except Exception as e:
         logger.exception("创建任务失败")
         return ResponseModel(code=500, message=f"创建任务失败: {e}")
+
+
+@router.post("/batch", response_model=ResponseModel)
+async def batch_create_tasks(request: BatchCreateTaskRequest) -> ResponseModel:
+    """批量创建排版任务
+
+    为每个 upload_id 创建独立任务，共享排版配置。
+    """
+    try:
+        created_tasks = []
+        for item in request.items:
+            # 查找上传的文件
+            file_path = None
+            filename = item.filename or item.upload_id
+            for ext in (".pdf", ".md", ".txt"):
+                candidate = UPLOAD_DIR / f"{item.upload_id}{ext}"
+                if candidate.exists():
+                    file_path = str(candidate)
+                    filename = candidate.name
+                    break
+
+            task = task_manager.create_task(
+                upload_id=item.upload_id,
+                filename=filename,
+                standard=request.standard,
+                use_rag=request.use_rag,
+                llm_model=request.llm_model,
+                custom_config={
+                    **(request.custom_config or {}),
+                    "file_path": file_path,
+                },
+            )
+            task_manager.submit_task(task.id)
+            created_tasks.append(task_manager.to_info_dict(task))
+
+        return ResponseModel(data={"tasks": created_tasks, "count": len(created_tasks)})
+    except Exception as e:
+        logger.exception("批量创建任务失败")
+        return ResponseModel(code=500, message=f"批量创建任务失败: {e}")
 
 
 @router.get("/stats", response_model=ResponseModel)
@@ -265,7 +305,7 @@ async def preview_result(task_id: str) -> ResponseModel:
 
 @router.get("/{task_id}/preview/docx")
 async def preview_docx(task_id: str):
-    """预览 Word 文档（返回 HTML）"""
+    """预览最终 Word 文档（返回 HTML）"""
     task = task_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -275,5 +315,24 @@ async def preview_docx(task_id: str):
     html = task_manager.get_docx_html_preview(task_id)
     if not html:
         raise HTTPException(status_code=404, detail="Word 文件不存在或转换失败")
+
+    return HTMLResponse(content=html)
+
+
+@router.get("/{task_id}/preview/mineru-docx")
+async def preview_mineru_docx(task_id: str):
+    """预览 MinerU 原始 Word 文档（返回 HTML）
+
+    展示 MinerU 解析后的原始排版效果，未经国标样式渲染。
+    """
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.status != "completed":
+        raise HTTPException(status_code=400, detail="任务尚未完成")
+
+    html = task_manager.get_mineru_docx_html_preview(task_id)
+    if not html:
+        raise HTTPException(status_code=404, detail="MinerU 原始 DOCX 不存在或转换失败")
 
     return HTMLResponse(content=html)

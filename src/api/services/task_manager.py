@@ -360,6 +360,7 @@ class TaskManager:
         try:
             # ──────── 阶段 1: MinerU 解析 ────────
             markdown_content = ""
+            mineru_docx_path: str | None = None
 
             if file_path and Path(file_path).exists():
                 ext = Path(file_path).suffix.lower()
@@ -421,9 +422,15 @@ class TaskManager:
             # ──────── 阶段 2.5: 样式提取（LLM + RAG） ────────
             style_config = self._generate_style_config(task_id, cleaned_markdown, intent)
 
-            # ──────── 阶段 3: Pandoc 转换 → DOCX ────────
-            self.update_status(task_id, "processing", progress=40, current_step="render_docx")
-            docx_path = self._convert_to_docx(task_id, cleaned_markdown, extract_dir)
+            # ──────── 阶段 3: 确定基础 DOCX ────────
+            # PDF 文件优先使用 MinerU 原始 DOCX；非 PDF 文件回退到 Pandoc 转换
+            self.update_status(task_id, "processing", progress=40, current_step="prepare_docx")
+            if mineru_docx_path and Path(mineru_docx_path).exists():
+                docx_path = mineru_docx_path
+                logger.info("任务 %s: 使用 MinerU 原始 DOCX 作为样式基础: %s", task_id, docx_path)
+            else:
+                # 回退：Pandoc MD→DOCX（保留代码路径，用于非 PDF 文件）
+                docx_path = self._convert_to_docx(task_id, cleaned_markdown, extract_dir)
 
             # ──────── 阶段 4: 国标样式渲染 ────────
             self.update_status(task_id, "processing", progress=70, current_step="apply_style")
@@ -625,7 +632,7 @@ class TaskManager:
         return info
 
     def get_docx_html_preview(self, task_id: str) -> str | None:
-        """将任务生成的 DOCX 转换为 HTML 供前端预览
+        """将任务生成的最终 DOCX 转换为 HTML 供前端预览
 
         使用 Pandoc 将 DOCX 转换为 HTML，内嵌图片资源（base64），
         确保前端 iframe 预览时图片能正确显示。
@@ -652,6 +659,30 @@ class TaskManager:
             return html
         except Exception as e:
             logger.error("任务 %s: DOCX→HTML 转换失败: %s", task_id, e)
+            return None
+
+    def get_mineru_docx_html_preview(self, task_id: str) -> str | None:
+        """将 MinerU 原始 DOCX 转换为 HTML 供前端预览
+
+        与 get_docx_html_preview 逻辑相同，但输入为 MinerU 提供的原始 DOCX，
+        用于展示 MinerU 解析后的原始排版效果（样式渲染前）。
+        """
+        docx_path = self.get_mineru_docx_path(task_id)
+        if not docx_path:
+            return None
+
+        try:
+            import pypandoc
+            html = pypandoc.convert_file(
+                str(docx_path),
+                "html",
+                format="docx",
+                extra_args=["--wrap=none", "--standalone", "--embed-resources"],
+            )
+            logger.info("任务 %s: MinerU DOCX→HTML 预览生成成功, %d 字符", task_id, len(html))
+            return html
+        except Exception as e:
+            logger.error("任务 %s: MinerU DOCX→HTML 转换失败: %s", task_id, e)
             return None
 
     # ──────── 管线辅助方法 ────────
