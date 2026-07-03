@@ -159,4 +159,5 @@ class UpdateConfigRequest(BaseModel):
     rag_vector_weight: float | None = Field(default=None, ge=0, le=1)
     rag_top_k: int | None = Field(default=None, ge=1, le=20)
     pandoc_path: str | None = Field(default=None)
+    output_dir: str | None = Field(default=None, description="输出目录")
     max_file_size_mb: int | None = Field(default=None, ge=1, le=500)

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   Card,
@@ -10,9 +10,16 @@ import {
   Spin,
   Space,
   Timeline,
+  Tabs,
+  Empty,
 } from 'antd'
-import { ArrowLeftOutlined } from '@ant-design/icons'
-import { getTask } from '../services/api'
+import {
+  ArrowLeftOutlined,
+  DownloadOutlined,
+  EyeOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons'
+import { getTask, previewTask, getDownloadUrl, retryTask } from '../services/api'
 
 interface TaskDetail {
   id: string
@@ -25,14 +32,45 @@ interface TaskDetail {
   updated_at: string
   completed_at: string | null
   error_message: string | null
+  result_path: string | null
+  cleaned_markdown_preview: string | null
+  style_config_preview: Record<string, unknown> | null
 }
+
+const statusColor: Record<string, string> = {
+  completed: 'success',
+  processing: 'processing',
+  failed: 'error',
+  pending: 'default',
+  cancelled: 'warning',
+}
+
+const statusText: Record<string, string> = {
+  completed: '已完成',
+  processing: '处理中',
+  failed: '失败',
+  pending: '待处理',
+  cancelled: '已取消',
+}
+
+const WORKFLOW_STEPS = [
+  { key: 'parse_input', label: '解析输入文档' },
+  { key: 'analyze_intent', label: '分析文档意图' },
+  { key: 'review_content', label: '审查 Markdown 内容' },
+  { key: 'extract_style', label: '提取排版样式' },
+  { key: 'validate_output', label: '校验输出' },
+  { key: 'render_docx', label: '生成 Word 文档' },
+]
 
 const TaskDetailPage: React.FC = () => {
   const { taskId } = useParams<{ taskId: string }>()
   const [task, setTask] = useState<TaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [preview, setPreview] = useState<{ markdown_preview: string; style_config: Record<string, unknown> } | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [retrying, setRetrying] = useState(false)
 
-  const fetchTask = async () => {
+  const fetchTask = useCallback(async () => {
     if (!taskId) return
     try {
       const res = await getTask(taskId)
@@ -42,13 +80,45 @@ const TaskDetailPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [taskId])
 
   useEffect(() => {
     fetchTask()
-    const interval = setInterval(fetchTask, 2000)
+    const interval = setInterval(fetchTask, 3000)
     return () => clearInterval(interval)
-  }, [taskId])
+  }, [fetchTask])
+
+  const fetchPreview = async () => {
+    if (!taskId) return
+    setPreviewLoading(true)
+    try {
+      const res = await previewTask(taskId)
+      setPreview(res.data.data)
+    } catch (error: any) {
+      message.error(error.message || '获取预览失败')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const handleDownload = () => {
+    if (!taskId) return
+    window.open(getDownloadUrl(taskId), '_blank')
+  }
+
+  const handleRetry = async () => {
+    if (!taskId) return
+    setRetrying(true)
+    try {
+      await retryTask(taskId)
+      message.success('任务已重新提交')
+      fetchTask()
+    } catch (error: any) {
+      message.error(error.message || '重试失败')
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -59,24 +129,49 @@ const TaskDetailPage: React.FC = () => {
   }
 
   if (!task) {
-    return <div>任务不存在</div>
+    return <Empty description="任务不存在" />
   }
 
-  const statusColor: Record<string, string> = {
-    completed: 'success',
-    processing: 'processing',
-    failed: 'error',
-    pending: 'default',
-    cancelled: 'warning',
-  }
+  const currentStepIndex = WORKFLOW_STEPS.findIndex((s) => s.key === task.current_step)
+
+  const timelineItems = WORKFLOW_STEPS.map((step, idx) => {
+    let color = 'gray'
+    if (task.status === 'failed' && idx === Math.max(0, currentStepIndex)) {
+      color = 'red'
+    } else if (task.status === 'completed' || (currentStepIndex >= 0 && idx < currentStepIndex)) {
+      color = 'green'
+    } else if (idx === currentStepIndex && task.status === 'processing') {
+      color = 'blue'
+    }
+    return { color, children: step.label }
+  })
 
   return (
     <div>
-      <Space style={{ marginBottom: 24 }}>
-        <Link to="/tasks">
-          <Button icon={<ArrowLeftOutlined />}>返回</Button>
-        </Link>
-        <h2 style={{ margin: 0 }}>任务详情</h2>
+      <Space style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between' }}>
+        <Space>
+          <Link to="/tasks">
+            <Button icon={<ArrowLeftOutlined />}>返回</Button>
+          </Link>
+          <h2 style={{ margin: 0 }}>任务详情</h2>
+        </Space>
+        <Space>
+          {task.status === 'completed' && (
+            <>
+              <Button icon={<EyeOutlined />} onClick={fetchPreview} loading={previewLoading}>
+                预览结果
+              </Button>
+              <Button type="primary" icon={<DownloadOutlined />} onClick={handleDownload}>
+                下载 Word
+              </Button>
+            </>
+          )}
+          {task.status === 'failed' && (
+            <Button type="primary" icon={<ReloadOutlined />} onClick={handleRetry} loading={retrying}>
+              重试
+            </Button>
+          )}
+        </Space>
       </Space>
 
       <Card title="基本信息" style={{ marginBottom: 24 }}>
@@ -91,19 +186,24 @@ const TaskDetailPage: React.FC = () => {
             {task.standard}
           </Descriptions.Item>
           <Descriptions.Item label="状态" span={1}>
-            <Tag color={statusColor[task.status] || 'default'}>{task.status}</Tag>
+            <Tag color={statusColor[task.status] || 'default'}>
+              {statusText[task.status] || task.status}
+            </Tag>
           </Descriptions.Item>
           <Descriptions.Item label="进度" span={3}>
-            <Progress percent={task.progress} status={task.status === 'processing' ? 'active' : undefined} />
+            <Progress
+              percent={task.progress}
+              status={task.status === 'processing' ? 'active' : task.status === 'failed' ? 'exception' : undefined}
+            />
           </Descriptions.Item>
           <Descriptions.Item label="当前步骤" span={1}>
             {task.current_step || '-'}
           </Descriptions.Item>
           <Descriptions.Item label="创建时间" span={1}>
-            {task.created_at}
+            {task.created_at || '-'}
           </Descriptions.Item>
           <Descriptions.Item label="更新时间" span={1}>
-            {task.updated_at}
+            {task.updated_at || '-'}
           </Descriptions.Item>
           {task.completed_at && (
             <Descriptions.Item label="完成时间" span={3}>
@@ -118,18 +218,59 @@ const TaskDetailPage: React.FC = () => {
         </Descriptions>
       </Card>
 
-      <Card title="处理流程">
-        <Timeline
-          items={[
-            { children: '解析输入文档' },
-            { children: '分析文档意图' },
-            { children: '审查 Markdown 内容' },
-            { children: '提取排版样式' },
-            { children: '校验输出' },
-            { children: '生成 Word 文档' },
-          ]}
-        />
-      </Card>
+      <Tabs
+        items={[
+          {
+            key: 'timeline',
+            label: '处理流程',
+            children: (
+              <Card>
+                <Timeline items={timelineItems} />
+              </Card>
+            ),
+          },
+          {
+            key: 'preview',
+            label: 'Markdown 预览',
+            children: preview ? (
+              <Card>
+                <pre style={{
+                  maxHeight: 500,
+                  overflow: 'auto',
+                  background: '#f5f5f5',
+                  padding: 16,
+                  borderRadius: 8,
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                }}>
+                  {preview.markdown_preview || '(无预览内容)'}
+                </pre>
+                {preview.style_config && (
+                  <div style={{ marginTop: 16 }}>
+                    <h4>样式配置</h4>
+                    <pre style={{
+                      background: '#f5f5f5',
+                      padding: 16,
+                      borderRadius: 8,
+                      fontSize: 13,
+                    }}>
+                      {JSON.stringify(preview.style_config, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </Card>
+            ) : (
+              <Card>
+                <div style={{ textAlign: 'center', padding: 40 }}>
+                  <Button icon={<EyeOutlined />} onClick={fetchPreview} loading={previewLoading}>
+                    加载预览
+                  </Button>
+                </div>
+              </Card>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }

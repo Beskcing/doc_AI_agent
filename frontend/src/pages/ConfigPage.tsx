@@ -77,6 +77,10 @@ const ConfigPage: React.FC = () => {
             <Input />
           </Form.Item>
 
+          <Form.Item label="输出目录" name="output_dir">
+            <Input />
+          </Form.Item>
+
           <Form.Item label="最大文件大小 (MB)" name="max_file_size_mb">
             <InputNumber min={1} max={500} style={{ width: '100%' }} />
           </Form.Item>

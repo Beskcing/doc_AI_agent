@@ -11,7 +11,7 @@
  - 架构设计：`docs/ARCHITECTURE.md`
  - 智能体提示词：`prompts/system_prompt.md`
  - 工作流定义：`src/workflows/doc_formatting_graph.py`
- - 工具链代码：`src/tools/` (包含 mineru_parser.py, pandoc_converter.py, docx_styler.py, markdown_cleaner.py, html_table_preserver.py)
+ - 工具链代码：`src/tools/` (包含 mineru_parser.py, mineru_api_client.py, pandoc_converter.py, docx_styler.py, markdown_cleaner.py, html_table_preserver.py)
  - RAG 知识库配置：`src/rag/knowledge_base_config.py`
  - Web API 服务：`src/api/main.py` (FastAPI 入口)
  - API 路由：`src/api/routers/` (upload.py, tasks.py, kb.py, config.py)
@@ -61,6 +61,7 @@
  - [ ] 所有代码通过 Lint 检查，测试覆盖率达到 80% 以上。
  - [ ] 前端 TypeScript 编译无错误，生产构建成功。
  - [ ] E2E 测试全部通过（`python tests/e2e/test_e2e_full.py`）。
+ - [ ] MinerU 线上 API 解析正常，Markdown 提取完整。
  - [ ] 数据库持久化正常，重启服务后数据不丢失。
 
 ## 项目结构
@@ -87,7 +88,8 @@ doc_ai_agent/
 │   │   ├── style_config.py
 │   │   └── document_schema.py
 │   ├── tools/                   # 工具链
-│   │   ├── mineru_parser.py
+│   │   ├── mineru_parser.py     # PDF 解析器（online/local 双模式）
+│   │   ├── mineru_api_client.py # MinerU 线上 API 客户端
 │   │   ├── html_table_preserver.py
 │   │   ├── markdown_cleaner.py
 │   │   ├── pandoc_converter.py
@@ -159,41 +161,24 @@ doc_ai_agent/
     ├── uploads/                 # 上传文件
     └── output/                  # 输出文件
 ```
-# AGENTS.md - 国标文档排版智能体工程规范
- 本仓库用于开发“企业级文档结构化与排版智能体”。人类负责定义意图、约束和审查标准；Agent 负责实现逻辑、编写工具代码、测试与文档维护。
 
-## Product (产品定义)构建一个高可用、零幻觉的企业级文档排版智能体：
- - 核心能力：解析 MinerU 输出的 Markdown，清洗 OCR 瑕疵，结合 RAG 规范库提取样式，最终生成符合国标要求的 Word 文档。
- - 技术栈：LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU/MarkItDown (解析) + Pandoc/python-docx (渲染)。
- - 知识库：基于向量数据库（Chroma/Milvus）构建的排版规范 RAG 系统。
+## MinerU 解析配置
 
-## Start Here (开发起点)
- - 架构设计：`docs/ARCHITECTURE.md`
- - 智能体提示词：`prompts/system_prompt.md`
- - 工作流定义：`src/workflows/doc_formatting_graph.py`
- - 工具链代码：`src/tools/` (包含 mineru_parser.py, pandoc_converter.py, docx_styler.py)- RAG 知识库配置：`src/rag/knowledge_base_config.py`
- - 测试用例集：`tests/` (必须包含 Bad Case 测试)
+PDF 解析支持两种模式，通过 `configs/settings.yaml` 中 `mineru.mode` 配置：
 
-## Agent Operating Rules (智能体操作规则)在协助开发此项目时，必须严格遵守以下工程规范：
-1. 架构解耦原则（防幻觉铁律）：   
- - 严禁让 LLM 直接生成 Word XML 或 python-docx 渲染代码。  
- - LLM 只能输出结构化数据（JSON/Markdown），所有文件 I/O 和样式渲染必须由传统的 Python 工具函数执行。
-2. RAG 集成规范：   
- - 知识库切片（Chunking）必须保留语义完整性，技术文档建议 Chunk Size 设为 600-800，Overlap 设为 15%。   
- - 必须实现混合检索（BM25 + 向量检索），确保专有名词（如“仿宋_GB2312”、“OMML”）精准命中。   
- - 检索结果必须注入到 LLM 的上下文中，并在输出时提供来源追溯（rag_sources）。
-3. 代码与测试规范：   
- - 优先提交小型 Pull Request。  
- - 任何涉及 MinerU 解析或 Pandoc 转换的代码修改，必须附带至少一个 PDF 测试用例。  
- - 核心渲染函数（如 `apply_gb_style`）必须有单元测试覆盖主路径和异常路径。
-4. 文档同步更新：   
- - 行为或工具链发生变更时，必须同步更新 `AGENTS.md` 和相关文档。  
- - 新增的排版规则需同步更新至 RAG 知识库。
+| 模式 | 说明 | 依赖 |
+|------|------|------|
+| `online` (默认) | 调用 MinerU 线上精准解析 API，无需本地安装 SDK | `requests`，需配置 `MINERU_API_TOKEN` |
+| `local` | 使用本地 MinerU (magic-pdf) SDK 解析 | `magic-pdf` (可选依赖) |
 
-## Definition of Done (完成标准)
- 一个功能被视为“完成”，必须满足：
- - [ ] LLM 输出的 JSON 格式稳定，且能通过 JSON Schema 校验。
- - [ ] RAG 检索到的规范准确无误，无幻觉。
- - [ ] Pandoc 转换无报错，HTML 表格和 LaTeX 公式正确映射。
- - [ ] python-docx 成功应用样式，生成的 Word 文档通过人工或自动化排版校验。
- - [ ] 所有代码通过 Lint 检查，测试覆盖率达到 80% 以上。
+### 环境变量
+- `MINERU_API_TOKEN`: MinerU 线上 API Token，从 https://mineru.net/apiManage 获取
+
+### 模型版本
+- `vlm` (默认): 视觉语言模型，推荐使用
+- `pipeline`: 默认管道模型
+- `MinerU-HTML`: HTML 文件专用
+
+### API 客户端
+- `src/tools/mineru_api_client.py`: 封装线上 API 全流程（上传→轮询→下载ZIP→提取Markdown）
+- `src/tools/mineru_parser.py`: 统一解析器入口，支持 online/local 双模式切换

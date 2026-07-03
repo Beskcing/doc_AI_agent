@@ -38,3 +38,16 @@ pandoc:
   extra_args:
     - "--from=markdown+raw_html"
     - "--to=docx"
+
+mineru:
+  mode: "online"              # online（线上API）或 local（本地SDK）
+  # api_token 通过 .env 文件中的 MINERU_API_TOKEN 设置
+  base_url: "https://mineru.net"
+  model_version: "vlm"         # pipeline / vlm / MinerU-HTML
+  is_ocr: false
+  enable_formula: true
+  enable_table: true
+  language: "ch"
+  poll_interval: 5             # 轮询间隔（秒）
+  poll_timeout: 600            # 轮询总超时（秒）
+  request_timeout: 120         # HTTP 请求超时（秒）

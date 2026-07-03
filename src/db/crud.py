@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy.orm import Session
 
 from src.db.models import KbDocumentModel, SystemConfigModel, TaskModel
@@ -59,6 +61,15 @@ class TaskCRUD:
             task.current_step = current_step
         if error_message is not None:
             task.error_message = error_message
+        # 自动设置 completed_at
+        if status == "completed" and not task.completed_at:
+            task.completed_at = datetime.now()
+        # 重试时清除 completed_at
+        if status in ("pending", "processing") and task.completed_at:
+            task.completed_at = None
+        # 清除 error_message 当状态不是 failed 时
+        if status and status != "failed" and task.error_message and error_message is None:
+            task.error_message = None
         db.commit()
         db.refresh(task)
         return task
@@ -71,6 +82,23 @@ class TaskCRUD:
             db.commit()
             return True
         return False
+
+    @staticmethod
+    def count_by_status(db: Session) -> dict[str, int]:
+        """按状态统计任务数量"""
+        from sqlalchemy import func
+
+        results = db.query(TaskModel.status, func.count(TaskModel.id)).group_by(TaskModel.status).all()
+        counts = {"total": 0, "pending": 0, "processing": 0, "completed": 0, "failed": 0, "cancelled": 0}
+        for status, count in results:
+            counts[status] = count
+            counts["total"] += count
+        return counts
+
+    @staticmethod
+    def get_recent(db: Session, limit: int = 5) -> list[TaskModel]:
+        """获取最近的任务"""
+        return db.query(TaskModel).order_by(TaskModel.created_at.desc()).limit(limit).all()
 
 
 class KbDocumentCRUD:

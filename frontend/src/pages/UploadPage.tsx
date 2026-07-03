@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Card,
@@ -15,7 +15,7 @@ import {
 } from 'antd'
 import { FilePdfOutlined } from '@ant-design/icons'
 import type { UploadFile } from 'antd/es/upload/interface'
-import { uploadFile, createTask } from '../services/api'
+import { uploadFile, createTask, getSupportedStandards, getLlmModels } from '../services/api'
 
 const { Step } = Steps
 const { Text } = Typography
@@ -27,6 +27,29 @@ const UploadPage: React.FC = () => {
   const [uploadId, setUploadId] = useState<string | null>(null)
   const [form] = Form.useForm()
   const navigate = useNavigate()
+
+  const [standards, setStandards] = useState<Array<{ value: string; label: string }>>([
+    { value: 'GB/T 9704', label: '党政机关公文格式' },
+    { value: 'GB/T 7713', label: '科技报告编写格式' },
+    { value: 'custom', label: '自定义规范' },
+  ])
+  const [llmModels, setLlmModels] = useState<Array<{ value: string; label: string }>>([
+    { value: 'qwen-plus', label: '通义千问 Plus' },
+    { value: 'glm-4', label: '智谱 GLM-4' },
+  ])
+
+  useEffect(() => {
+    const loadOptions = async () => {
+      try {
+        const [stdRes, modelRes] = await Promise.all([getSupportedStandards(), getLlmModels()])
+        if (stdRes.data.data?.length) setStandards(stdRes.data.data)
+        if (modelRes.data.data?.length) setLlmModels(modelRes.data.data)
+      } catch {
+        // 使用默认值
+      }
+    }
+    loadOptions()
+  }, [])
 
   const handleUpload = async () => {
     if (fileList.length === 0) {
@@ -66,7 +89,6 @@ const UploadPage: React.FC = () => {
       })
       message.success('任务创建成功')
       setCurrentStep(2)
-      // 跳转到任务详情
       const taskId = res.data.data.id
       setTimeout(() => {
         navigate(`/tasks/${taskId}`)
@@ -103,7 +125,7 @@ const UploadPage: React.FC = () => {
               <FilePdfOutlined style={{ fontSize: 48, color: '#1890ff' }} />
             </p>
             <p className="ant-upload-text">点击或拖拽文件到此处上传</p>
-            <p className="ant-upload-hint">支持 PDF、Markdown 文件</p>
+            <p className="ant-upload-hint">支持 PDF、Markdown、TXT 文件</p>
           </Upload.Dragger>
           <div style={{ marginTop: 24, textAlign: 'center' }}>
             <Button
@@ -131,28 +153,21 @@ const UploadPage: React.FC = () => {
               name="standard"
               rules={[{ required: true, message: '请选择排版规范' }]}
             >
-              <Select>
-                <Select.Option value="GB/T 9704">党政机关公文格式</Select.Option>
-                <Select.Option value="GB/T 7713">科技报告编写格式</Select.Option>
-                <Select.Option value="custom">自定义规范</Select.Option>
-              </Select>
+              <Select options={standards} />
             </Form.Item>
 
             <Form.Item
               label="LLM 模型"
               name="llm_model"
             >
-              <Select>
-                <Select.Option value="qwen-plus">通义千问 Plus</Select.Option>
-                <Select.Option value="qwen-max">通义千问 Max</Select.Option>
-                <Select.Option value="glm-4">智谱 GLM-4</Select.Option>
-              </Select>
+              <Select options={llmModels} />
             </Form.Item>
 
             <Form.Item
               label="使用 RAG 知识库"
               name="use_rag"
               valuePropName="checked"
+              tooltip="启用后将从知识库中检索排版规范"
             >
               <Switch />
             </Form.Item>

@@ -29,6 +29,9 @@ python-dotenv>=1.0
 # 工具
 rich>=13.0
 
+# HTTP 客户端 (MinerU API)
+requests>=2.31
+
 # Web API
 fastapi>=0.115
 uvicorn>=0.30

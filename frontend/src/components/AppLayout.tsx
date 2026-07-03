@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Layout,
@@ -10,6 +10,7 @@ import {
   Typography,
   Avatar,
   Dropdown,
+  message,
 } from 'antd'
 import {
   DashboardOutlined,
@@ -20,8 +21,12 @@ import {
   UserOutlined,
   LogoutOutlined,
   DownOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  BellOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
+import { getTaskStats } from '../services/api'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
@@ -36,18 +41,29 @@ const menuItems: MenuItem[] = [
   { key: '/config', icon: <SettingOutlined />, label: '系统配置' },
 ]
 
-const userMenuItems: MenuItem[] = [
-  { key: 'profile', icon: <UserOutlined />, label: '个人中心' },
-  { key: 'logout', icon: <LogoutOutlined />, label: '退出登录' },
-]
-
 const AppLayout: React.FC = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
+  const [activeCount, setActiveCount] = useState(0)
   const {
     token: { colorBgContainer, borderRadiusLG },
   } = theme.useToken()
+
+  useEffect(() => {
+    const fetchActiveCount = async () => {
+      try {
+        const res = await getTaskStats()
+        const stats = res.data.data.stats
+        setActiveCount((stats.processing || 0) + (stats.pending || 0))
+      } catch {
+        // 静默
+      }
+    }
+    fetchActiveCount()
+    const interval = setInterval(fetchActiveCount, 10000)
+    return () => clearInterval(interval)
+  }, [])
 
   const selectedKeys = [location.pathname]
 
@@ -55,9 +71,25 @@ const AppLayout: React.FC = () => {
     navigate(key)
   }
 
+  const handleUserMenuClick: MenuProps['onClick'] = ({ key }) => {
+    if (key === 'profile') {
+      message.info('个人中心功能待开发')
+    } else if (key === 'settings') {
+      navigate('/config')
+    } else if (key === 'logout') {
+      message.info('退出登录功能待开发')
+    }
+  }
+
+  const userMenuItems: MenuItem[] = [
+    { key: 'profile', icon: <UserOutlined />, label: '个人中心' },
+    { key: 'settings', icon: <SettingOutlined />, label: '系统配置' },
+    { type: 'divider' },
+    { key: 'logout', icon: <LogoutOutlined />, label: '退出登录' },
+  ]
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      {/* 侧边栏 */}
       <Sider
         trigger={null}
         collapsible
@@ -96,7 +128,6 @@ const AppLayout: React.FC = () => {
       </Sider>
 
       <Layout style={{ marginLeft: collapsed ? 80 : 220, transition: 'all 0.2s' }}>
-        {/* 顶部导航 */}
         <Header
           style={{
             padding: '0 24px',
@@ -111,20 +142,26 @@ const AppLayout: React.FC = () => {
           }}
         >
           <Space>
-            <Button type="text" onClick={() => setCollapsed(!collapsed)}>
-              {collapsed ? '>' : '<'}
-            </Button>
+            <Button
+              type="text"
+              onClick={() => setCollapsed(!collapsed)}
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            />
             <Text strong style={{ fontSize: 16 }}>
               企业级国标文档结构化与排版智能体
             </Text>
           </Space>
 
           <Space size={16}>
-            <Badge count={0}>
-              <Button type="text">通知</Button>
+            <Badge count={activeCount} size="small">
+              <Button
+                type="text"
+                icon={<BellOutlined />}
+                onClick={() => navigate('/tasks')}
+              />
             </Badge>
             <Dropdown
-              menu={{ items: userMenuItems }}
+              menu={{ items: userMenuItems, onClick: handleUserMenuClick }}
               placement="bottomRight"
             >
               <Space style={{ cursor: 'pointer' }}>
@@ -136,7 +173,6 @@ const AppLayout: React.FC = () => {
           </Space>
         </Header>
 
-        {/* 主内容区 */}
         <Content
           style={{
             margin: '16px',

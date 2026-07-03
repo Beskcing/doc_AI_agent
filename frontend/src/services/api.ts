@@ -54,7 +54,15 @@ export const getTaskStatus = (taskId: string) => api.get(`/api/tasks/${taskId}/s
 
 export const cancelTask = (taskId: string) => api.post(`/api/tasks/${taskId}/cancel`)
 
+export const retryTask = (taskId: string) => api.post(`/api/tasks/${taskId}/retry`)
+
 export const previewTask = (taskId: string) => api.get(`/api/tasks/${taskId}/preview`)
+
+export const getTaskStats = () => api.get('/api/tasks/stats')
+
+export const getDownloadInfo = (taskId: string) => api.get(`/api/tasks/${taskId}/download`)
+
+export const getDownloadUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/download/file`
 
 // ────────── 知识库 ──────────
 export const listKbDocuments = (params?: { page?: number; page_size?: number }) =>

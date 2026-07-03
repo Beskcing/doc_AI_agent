@@ -71,6 +71,26 @@ class RAGConfig(BaseModel):
     vector_weight: float = 0.7
 
 
+class MinerUConfig(BaseModel):
+    """MinerU 解析配置"""
+
+    mode: Literal["online", "local"] = "online"
+    api_token: str = ""  # 优先从环境变量 MINERU_API_TOKEN 读取
+    base_url: str = "https://mineru.net"
+    model_version: str = "vlm"  # pipeline / vlm / MinerU-HTML
+    is_ocr: bool = False
+    enable_formula: bool = True
+    enable_table: bool = True
+    language: str = "ch"
+    poll_interval: int = 5  # 轮询间隔（秒）
+    poll_timeout: int = 600  # 轮询总超时（秒）
+    request_timeout: int = 120  # HTTP 请求超时（秒）
+
+    def get_token(self) -> str:
+        """获取 API Token（优先从环境变量）"""
+        return os.getenv("MINERU_API_TOKEN", "") or self.api_token
+
+
 class PathsConfig(BaseModel):
     """路径配置"""
 
@@ -95,6 +115,7 @@ class AppConfig(BaseModel):
     rag: RAGConfig = Field(default_factory=RAGConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     pandoc: PandocConfig = Field(default_factory=PandocConfig)
+    mineru: MinerUConfig = Field(default_factory=MinerUConfig)
 
     @classmethod
     def load(cls, config_path: str | Path | None = None) -> AppConfig:
@@ -159,4 +180,5 @@ class AppConfig(BaseModel):
             rag=RAGConfig(**raw.get("rag", {})),
             paths=PathsConfig(**raw.get("paths", {})),
             pandoc=PandocConfig(**raw.get("pandoc", {})),
+            mineru=MinerUConfig(**raw.get("mineru", {})),
         )
