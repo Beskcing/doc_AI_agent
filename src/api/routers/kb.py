@@ -59,10 +59,17 @@ async def list_kb_documents(
 
 @router.post("/documents", response_model=ResponseModel)
 async def upload_kb_document(file: UploadFile = File(...)) -> ResponseModel:
-    """上传知识库文档"""
+    """上传知识库文档
+
+    Bug#2 修复：使用 UUID 命名存储文件，避免同名文件覆盖。
+    原始文件名保存在 DB 的 name 字段中。
+    """
     try:
         ensure_dir(KB_DIR)
-        file_path = KB_DIR / (file.filename or "unknown.md")
+        original_name = file.filename or "unknown.md"
+        ext = Path(original_name).suffix.lower() or ".md"
+        stored_filename = f"{uuid.uuid4()}{ext}"
+        file_path = KB_DIR / stored_filename
         contents = await file.read()
         with open(file_path, "wb") as f:
             f.write(contents)
@@ -71,7 +78,7 @@ async def upload_kb_document(file: UploadFile = File(...)) -> ResponseModel:
         try:
             doc = KbDocumentCRUD.create(
                 db,
-                name=file.filename or "unknown",
+                name=original_name,
                 source=str(file_path),
                 status="indexed",
             )
@@ -85,10 +92,28 @@ async def upload_kb_document(file: UploadFile = File(...)) -> ResponseModel:
 
 @router.delete("/documents/{doc_id}", response_model=ResponseModel)
 async def delete_kb_document(doc_id: str) -> ResponseModel:
-    """删除知识库文档"""
+    """删除知识库文档
+
+    Bug#3 修复：同时删除物理文件，避免残留。
+    """
     try:
         db = SessionLocal()
         try:
+            # 先获取文档记录以拿到文件路径
+            doc = KbDocumentCRUD.get(db, doc_id)
+            if not doc:
+                return ResponseModel(code=404, message="文档不存在")
+
+            # 删除物理文件
+            if doc.source:
+                file_path = Path(doc.source)
+                if file_path.exists():
+                    try:
+                        file_path.unlink()
+                        logger.info("已删除知识库文件: %s", file_path)
+                    except OSError as e:
+                        logger.warning("删除知识库文件失败: %s (%s)", file_path, e)
+
             success = KbDocumentCRUD.delete(db, doc_id)
             if success:
                 return ResponseModel(data={"deleted": doc_id})
@@ -102,6 +127,49 @@ async def delete_kb_document(doc_id: str) -> ResponseModel:
 
 @router.post("/rebuild", response_model=ResponseModel)
 async def rebuild_kb_index() -> ResponseModel:
-    """重建知识库索引"""
-    # 实际应触发知识库重建
-    return ResponseModel(data={"rebuilding": True, "message": "知识库重建已启动"})
+    """重建知识库索引
+
+    Bug#4 修复：实际执行知识库重建，扫描 raw_docs 目录并重新索引。
+    """
+    try:
+        from src.config import AppConfig
+        from src.rag.knowledge_base_config import KnowledgeBaseManager
+
+        config = AppConfig.load()
+        kb_manager = KnowledgeBaseManager(config.rag)
+        kb_manager.initialize()
+
+        # 统计结果
+        retriever = kb_manager.get_retriever()
+        doc_count = len(retriever.documents) if hasattr(retriever, "documents") else 0
+
+        # 同步 DB 记录：确保 raw_docs 中的文件都有 DB 记录
+        db = SessionLocal()
+        try:
+            from src.db.models import KbDocumentModel
+            raw_dir = Path(config.paths.raw_docs_dir)
+            if raw_dir.exists():
+                for f in raw_dir.glob("*.md"):
+                    existing = db.query(KbDocumentModel).filter(
+                        KbDocumentModel.source == str(f)
+                    ).first()
+                    if not existing:
+                        new_doc = KbDocumentModel(
+                            name=f.name,
+                            source=str(f),
+                            status="indexed",
+                        )
+                        db.add(new_doc)
+                db.commit()
+        finally:
+            db.close()
+
+        logger.info("知识库重建完成: %d 个文档片段", doc_count)
+        return ResponseModel(data={
+            "rebuilding": True,
+            "message": f"知识库重建完成，共 {doc_count} 个文档片段",
+            "doc_count": doc_count,
+        })
+    except Exception as e:
+        logger.exception("知识库重建失败")
+        return ResponseModel(code=500, message=f"知识库重建失败: {e}")

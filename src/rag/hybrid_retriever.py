@@ -64,6 +64,11 @@ class HybridRetriever:
             len(chunked_docs), bm25_weight, vector_weight,
         )
 
+    @property
+    def documents(self) -> list[Document]:
+        """返回已索引的文档列表"""
+        return self._docs
+
     def retrieve(self, query: str) -> list[RetrievalResult]:
         """执行混合检索
 

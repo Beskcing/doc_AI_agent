@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -27,6 +28,18 @@ OUTPUT_DIR = Path("data/output")
 router = APIRouter(prefix="/api/tasks", tags=["任务"])
 
 
+def _resolve_original_filename(upload_id: str, fallback: str) -> str:
+    """Bug#1 修复：从上传元数据文件中恢复原始文件名"""
+    meta_path = UPLOAD_DIR / f"{upload_id}.meta"
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            return meta.get("original_filename", fallback)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return fallback
+
+
 @router.post("", response_model=ResponseModel)
 async def create_task(request: CreateTaskRequest) -> ResponseModel:
     """创建排版任务"""
@@ -41,6 +54,9 @@ async def create_task(request: CreateTaskRequest) -> ResponseModel:
                 file_path = str(candidate)
                 filename = candidate.name
                 break
+
+        # Bug#1 修复：恢复原始文件名
+        filename = _resolve_original_filename(upload_id, filename)
 
         task = task_manager.create_task(
             upload_id=upload_id,
@@ -80,6 +96,9 @@ async def batch_create_tasks(request: BatchCreateTaskRequest) -> ResponseModel:
                     file_path = str(candidate)
                     filename = candidate.name
                     break
+
+            # Bug#1 修复：恢复原始文件名
+            filename = _resolve_original_filename(item.upload_id, filename)
 
             task = task_manager.create_task(
                 upload_id=item.upload_id,
@@ -233,9 +252,13 @@ async def download_file(task_id: str):
     if not result_path or not result_path.exists():
         raise HTTPException(status_code=404, detail="结果文件不存在")
 
+    # Bug#1 修复：下载时使用原始文件名而非 UUID 文件名
+    original_stem = Path(task.filename).stem if task.filename else task_id
+    download_name = f"{original_stem}_排版结果.docx"
+
     return FileResponse(
         path=str(result_path),
-        filename=result_path.name,
+        filename=download_name,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 

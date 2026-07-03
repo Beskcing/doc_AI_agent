@@ -64,15 +64,16 @@ const TasksPage: React.FC = () => {
     }
   }, [])
 
+  // Bug#5 修复：轮询间隔随任务状态动态调整
+  const hasActive = tasks.some((t) => t.status === 'processing' || t.status === 'pending')
+
   useEffect(() => {
     fetchTasks(pagination.current, pagination.pageSize, statusFilter)
-    const hasActive = tasks.some((t) => t.status === 'processing' || t.status === 'pending')
     const interval = setInterval(() => {
       fetchTasks(pagination.current, pagination.pageSize, statusFilter)
     }, hasActive ? 3000 : 10000)
     return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagination.current, pagination.pageSize, statusFilter])
+  }, [pagination.current, pagination.pageSize, statusFilter, hasActive, fetchTasks])
 
   const handleCancel = async (taskId: string) => {
     try {

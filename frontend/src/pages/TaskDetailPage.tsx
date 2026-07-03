@@ -137,11 +137,15 @@ const TaskDetailPage: React.FC = () => {
     }
   }, [taskId])
 
+  // Bug#6 修复：任务完成/失败后停止高频轮询
+  const isTerminal = task?.status === 'completed' || task?.status === 'failed' || task?.status === 'cancelled'
+
   useEffect(() => {
     fetchTask()
-    const interval = setInterval(fetchTask, 3000)
+    // 终态时降低轮询频率（30s），非终态时 3s 高频轮询
+    const interval = setInterval(fetchTask, isTerminal ? 30000 : 3000)
     return () => clearInterval(interval)
-  }, [fetchTask])
+  }, [fetchTask, isTerminal])
 
   const fetchPreview = async () => {
     if (!taskId) return

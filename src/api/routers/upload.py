@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from pathlib import Path
@@ -36,18 +37,24 @@ async def upload_file(file: UploadFile = File(...)) -> ResponseModel:
     upload_id = str(uuid.uuid4())
     file_path = UPLOAD_DIR / f"{upload_id}{ext}"
 
+    original_filename = file.filename or "unknown"
     try:
         # 保存文件
         contents = await file.read()
         with open(file_path, "wb") as f:
             f.write(contents)
 
+        # Bug#1 修复：保存原始文件名元数据，供创建任务时恢复
+        meta_path = UPLOAD_DIR / f"{upload_id}.meta"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump({"original_filename": original_filename}, f, ensure_ascii=False)
+
         file_size = os.path.getsize(file_path)
 
         return ResponseModel(
             data=UploadResponse(
                 upload_id=upload_id,
-                filename=file.filename or "unknown",
+                filename=original_filename,
                 file_size=file_size,
                 content_type=file.content_type or "application/octet-stream",
             ),
@@ -75,16 +82,22 @@ async def batch_upload_files(files: list[UploadFile] = File(...)) -> ResponseMod
 
         upload_id = str(uuid.uuid4())
         file_path = UPLOAD_DIR / f"{upload_id}{ext}"
+        original_filename = file.filename or "unknown"
 
         try:
             contents = await file.read()
             with open(file_path, "wb") as f:
                 f.write(contents)
 
+            # Bug#1 修复：保存原始文件名元数据
+            meta_path = UPLOAD_DIR / f"{upload_id}.meta"
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump({"original_filename": original_filename}, f, ensure_ascii=False)
+
             file_size = os.path.getsize(file_path)
             results.append(UploadResponse(
                 upload_id=upload_id,
-                filename=file.filename or "unknown",
+                filename=original_filename,
                 file_size=file_size,
                 content_type=file.content_type or "application/octet-stream",
             ))
