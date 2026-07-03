@@ -406,13 +406,13 @@ const ChatPage: React.FC = () => {
           <Space direction="vertical" style={{ width: '100%' }} size="small">
             <Row gutter={8}>
               <Col span={12}>
-                <Text type="secondary">字体</Text>
+                <Text type="secondary">中文字体</Text>
                 <Input
-                  value={(bodyFont?.family as string) || ''}
+                  value={(bodyFont?.east_asia_family as string) || (bodyFont?.family as string) || ''}
                   size="small"
                   onChange={e => setStyleConfig({
                     ...styleConfig,
-                    body_style: { ...bs, font: { ...bodyFont, family: e.target.value } },
+                    body_style: { ...bs, font: { ...bodyFont, east_asia_family: e.target.value } },
                   })}
                 />
               </Col>
@@ -493,6 +493,47 @@ const ChatPage: React.FC = () => {
                 />
               </Col>
             </Row>
+            <Row gutter={8}>
+              <Col span={8}>
+                <Text type="secondary">段前(pt)</Text>
+                <InputNumber
+                  value={bs?.space_before_pt as number}
+                  style={{ width: '100%' }}
+                  size="small"
+                  step={0.5}
+                  onChange={v => setStyleConfig({
+                    ...styleConfig,
+                    body_style: { ...bs, space_before_pt: v },
+                  })}
+                />
+              </Col>
+              <Col span={8}>
+                <Text type="secondary">段后(pt)</Text>
+                <InputNumber
+                  value={bs?.space_after_pt as number}
+                  style={{ width: '100%' }}
+                  size="small"
+                  step={0.5}
+                  onChange={v => setStyleConfig({
+                    ...styleConfig,
+                    body_style: { ...bs, space_after_pt: v },
+                  })}
+                />
+              </Col>
+              <Col span={8}>
+                <Text type="secondary">左缩进(cm)</Text>
+                <InputNumber
+                  value={bs?.left_indent_cm as number}
+                  style={{ width: '100%' }}
+                  size="small"
+                  step={0.1}
+                  onChange={v => setStyleConfig({
+                    ...styleConfig,
+                    body_style: { ...bs, left_indent_cm: v },
+                  })}
+                />
+              </Col>
+            </Row>
           </Space>
         </Panel>
 
@@ -501,15 +542,157 @@ const ChatPage: React.FC = () => {
             {hs.map((h, i) => {
               const hf = h.font as Record<string, unknown> | undefined
               return (
-                <div key={i} style={{ marginBottom: 8 }}>
+                <div key={i} style={{ marginBottom: 8, padding: '4px 0', borderBottom: i < hs.length - 1 ? '1px solid #f0f0f0' : 'none' }}>
                   <Tag color="blue">第{String(h.level)}级</Tag>
-                  <Text>{String(hf?.family ?? '')} {String(hf?.size_pt ?? '')}pt </Text>
+                  <Text>{String(hf?.east_asia_family ?? hf?.family ?? '')} {String(hf?.size_pt ?? '')}pt </Text>
+                  {Boolean(hf?.bold) && <Tag>加粗</Tag>}
                   <Text type="secondary">{String(h.alignment ?? '')}</Text>
+                  <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                    行距: {String(h.line_spacing ?? '')} | 缩进: {String(h.first_line_indent_chars ?? '')}字
+                    {h.numbering_format ? ` | 编号: ${String(h.numbering_format)}` : ''}
+                  </div>
                 </div>
               )
             })}
           </Panel>
         )}
+
+        {(() => {
+          const ts = styleConfig.table_style as Record<string, unknown> | undefined | null
+          if (!ts) return null
+          return (
+            <Panel header="表格样式" key="table">
+              <Space direction="vertical" style={{ width: '100%' }} size="small">
+                <Row gutter={8}>
+                  <Col span={12}>
+                    <Text type="secondary">边框样式</Text>
+                    <Select
+                      value={(ts.border_style as string) || 'single'}
+                      style={{ width: '100%' }}
+                      size="small"
+                      onChange={v => setStyleConfig({ ...styleConfig, table_style: { ...ts, border_style: v } })}
+                      options={[
+                        { value: 'single', label: '单线' },
+                        { value: 'double', label: '双线' },
+                        { value: 'three-line', label: '三线表' },
+                        { value: 'none', label: '无边框' },
+                      ]}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Text type="secondary">线宽(pt)</Text>
+                    <InputNumber
+                      value={ts.border_width_pt as number}
+                      style={{ width: '100%' }}
+                      size="small"
+                      step={0.1}
+                      onChange={v => setStyleConfig({ ...styleConfig, table_style: { ...ts, border_width_pt: v } })}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Text type="secondary">对齐</Text>
+                    <Select
+                      value={(ts.table_alignment as string) || 'left'}
+                      style={{ width: '100%' }}
+                      size="small"
+                      onChange={v => setStyleConfig({ ...styleConfig, table_style: { ...ts, table_alignment: v } })}
+                      options={[
+                        { value: 'left', label: '左' },
+                        { value: 'center', label: '居中' },
+                        { value: 'right', label: '右' },
+                      ]}
+                    />
+                  </Col>
+                </Row>
+                <Row gutter={8}>
+                  <Col span={12}>
+                    <Text type="secondary">表头加粗</Text>
+                    <Select
+                      value={ts.header_bold ? 'yes' : 'no'}
+                      style={{ width: '100%' }}
+                      size="small"
+                      onChange={v => setStyleConfig({ ...styleConfig, table_style: { ...ts, header_bold: v === 'yes' } })}
+                      options={[{ value: 'no', label: '否' }, { value: 'yes', label: '是' }]}
+                    />
+                  </Col>
+                  <Col span={12}>
+                    <Text type="secondary">表头背景色</Text>
+                    <Input
+                      value={(ts.header_bg_color as string) || ''}
+                      size="small"
+                      placeholder="如 #D9E2F3"
+                      onChange={e => setStyleConfig({ ...styleConfig, table_style: { ...ts, header_bg_color: e.target.value || null } })}
+                    />
+                  </Col>
+                </Row>
+                <Row gutter={8}>
+                  <Col span={12}>
+                    <Text type="secondary">表头跨页重复</Text>
+                    <Select
+                      value={ts.header_repeat ? 'yes' : 'no'}
+                      style={{ width: '100%' }}
+                      size="small"
+                      onChange={v => setStyleConfig({ ...styleConfig, table_style: { ...ts, header_repeat: v === 'yes' } })}
+                      options={[{ value: 'no', label: '否' }, { value: 'yes', label: '是' }]}
+                    />
+                  </Col>
+                  <Col span={12}>
+                    <Text type="secondary">垂直对齐</Text>
+                    <Select
+                      value={(ts.cell_vertical_alignment as string) || 'center'}
+                      style={{ width: '100%' }}
+                      size="small"
+                      onChange={v => setStyleConfig({ ...styleConfig, table_style: { ...ts, cell_vertical_alignment: v } })}
+                      options={[
+                        { value: 'top', label: '顶部' },
+                        { value: 'center', label: '居中' },
+                        { value: 'bottom', label: '底部' },
+                      ]}
+                    />
+                  </Col>
+                </Row>
+              </Space>
+            </Panel>
+          )
+        })()}
+
+        {(() => {
+          const ls = styleConfig.list_style as Record<string, unknown> | undefined | null
+          const fs = styleConfig.footnote_style as Record<string, unknown> | undefined | null
+          const hfs = styleConfig.header_footer_style as Record<string, unknown> | undefined | null
+          const cs = styleConfig.caption_style as Record<string, unknown> | undefined | null
+          if (!ls && !fs && !hfs && !cs) return null
+          return (
+            <Panel header="其他样式" key="other">
+              <Space direction="vertical" style={{ width: '100%' }} size="small">
+                {ls && (
+                  <div>
+                    <Tag color="green">列表</Tag>
+                    <Text>{String((ls.font as Record<string, unknown>)?.east_asia_family ?? (ls.font as Record<string, unknown>)?.family ?? '')} {String((ls.font as Record<string, unknown>)?.size_pt ?? '')}pt</Text>
+                  </div>
+                )}
+                {cs && (
+                  <div>
+                    <Tag color="orange">图表标题</Tag>
+                    <Text>{String((cs.font as Record<string, unknown>)?.east_asia_family ?? (cs.font as Record<string, unknown>)?.family ?? '')} {String((cs.font as Record<string, unknown>)?.size_pt ?? '')}pt</Text>
+                  </div>
+                )}
+                {fs && (
+                  <div>
+                    <Tag color="purple">脚注</Tag>
+                    <Text>{String((fs.font as Record<string, unknown>)?.east_asia_family ?? (fs.font as Record<string, unknown>)?.family ?? '')} {String((fs.font as Record<string, unknown>)?.size_pt ?? '')}pt</Text>
+                  </div>
+                )}
+                {hfs && (
+                  <div>
+                    <Tag color="cyan">页眉页脚</Tag>
+                    <Text>{String((hfs.font as Record<string, unknown>)?.east_asia_family ?? (hfs.font as Record<string, unknown>)?.family ?? '')} {String((hfs.font as Record<string, unknown>)?.size_pt ?? '')}pt</Text>
+                  </div>
+                )}
+              </Space>
+            </Panel>
+          )
+        })()}
 
         <Panel header="原始 JSON" key="json">
           <TextArea

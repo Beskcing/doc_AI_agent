@@ -126,7 +126,6 @@ class DocxStyler:
                     self._apply_heading_style(paragraph, heading_style)
                     headings_styled += 1
                 else:
-                    # 没有配置时使用默认正文样式
                     self._apply_paragraph_style(paragraph, self.config.body_style)
                     self._warnings.append(f"标题层级 {level} 无对应样式配置，使用正文样式")
             elif role == "body":
@@ -136,8 +135,11 @@ class DocxStyler:
                 list_style = self.config.list_style or self.config.body_style
                 self._apply_paragraph_style(paragraph, list_style)
                 paragraphs_styled += 1
+            elif role == "caption":
+                caption_style = self.config.caption_style or self.config.body_style
+                self._apply_paragraph_style(paragraph, caption_style)
+                paragraphs_styled += 1
             elif role == "toc":
-                # 目录段落使用正文样式
                 self._apply_paragraph_style(paragraph, self.config.body_style)
                 paragraphs_styled += 1
 
@@ -227,17 +229,34 @@ class DocxStyler:
 
         # 段落格式
         pf = paragraph.paragraph_format
-        pf.line_spacing = style.line_spacing
-        if style.line_spacing_pt is not None:
+        # 行距：支持倍数行距和固定行距
+        if style.line_spacing_rule == "exact" and style.line_spacing_pt is not None:
             pf.line_spacing = Pt(style.line_spacing_pt)
+        elif style.line_spacing_rule == "at_least" and style.line_spacing_pt is not None:
+            from docx.enum.text import WD_LINE_SPACING
+            pf.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+            pf.line_spacing = Pt(style.line_spacing_pt)
+        else:
+            pf.line_spacing = style.line_spacing
         pf.space_before = Pt(style.space_before_pt)
         pf.space_after = Pt(style.space_after_pt)
 
         # 首行缩进
         if style.first_line_indent_chars > 0:
-            # 首行缩进 = 字符数 × 字号
             indent_pt = style.first_line_indent_chars * style.font.size_pt
             pf.first_line_indent = Pt(indent_pt)
+
+        # 左右缩进
+        if style.left_indent_cm > 0:
+            pf.left_indent = Cm(style.left_indent_cm)
+        if style.right_indent_cm > 0:
+            pf.right_indent = Cm(style.right_indent_cm)
+
+        # 段落分页控制
+        if hasattr(style, 'keep_together') and style.keep_together:
+            pf.keep_together = True
+        if hasattr(style, 'widow_control'):
+            pf.widow_control = style.widow_control
 
         # 应用字体到所有 run
         for run in paragraph.runs:
@@ -253,9 +272,8 @@ class DocxStyler:
         # 应用段落级样式
         self._apply_paragraph_style(paragraph, style)
 
-        # 段中不分页
-        if style.keep_with_next:
-            paragraph.paragraph_format.keep_with_next = True
+        # 段中不分页（标题默认启用）
+        paragraph.paragraph_format.keep_with_next = True
 
     def _apply_table_style(self, table: Table) -> None:
         """应用表格样式
@@ -267,21 +285,34 @@ class DocxStyler:
         if not ts:
             return
 
+        # 设置表格对齐方式
+        self._set_table_alignment(table, ts.table_alignment)
+
         for row_idx, row in enumerate(table.rows):
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
                     # 表头使用表头字体，其余用正文字体
-                    if row_idx == 0 and ts.header_bold:
-                        self._apply_font_to_run_all(paragraph, ts.header_font, bold=True)
+                    if row_idx == 0:
+                        self._apply_font_to_run_all(paragraph, ts.header_font, bold=ts.header_bold if ts.header_bold else None)
+                        # 表头背景色
+                        if ts.header_bg_color:
+                            self._set_cell_shading(cell, ts.header_bg_color)
                     else:
                         self._apply_font_to_run_all(paragraph, ts.body_font)
 
-                # 设置单元格内边距
-                self._set_cell_margins(cell, ts.cell_padding_pt)
+                # 设置单元格垂直对齐
+                self._set_cell_vertical_alignment(cell, ts.cell_vertical_alignment)
+
+                # 设置单元格内边距（四边独立）
+                self._set_cell_margins_full(cell, ts)
+
+        # 表头行跨页重复
+        if ts.header_repeat and table.rows:
+            self._set_header_repeat(table)
 
         # 设置边框样式
         if ts.border_style != "none":
-            self._set_table_borders(table, ts.border_width_pt, ts.border_style)
+            self._set_table_borders_full(table, ts)
 
     def _apply_font_to_run(self, run, font_config: FontConfig) -> None:
         """将字体配置应用到单个 run
@@ -293,8 +324,9 @@ class DocxStyler:
         run.font.size = Pt(font_config.size_pt)
         run.font.bold = font_config.bold
         run.font.italic = font_config.italic
+        run.font.underline = font_config.underline if hasattr(font_config, 'underline') else False
 
-        # 设置中文字体
+        # 设置西文字体
         run.font.name = font_config.family
         # 使用 XML 属性设置东亚字体（中文）
         r_element = run._element
@@ -306,7 +338,19 @@ class DocxStyler:
         if r_fonts is None:
             r_fonts = rpr.makeelement(qn("w:rFonts"), {})
             rpr.insert(0, r_fonts)
-        r_fonts.set(qn("w:eastAsia"), font_config.family)
+        r_fonts.set(qn("w:ascii"), font_config.family)
+        r_fonts.set(qn("w:hAnsi"), font_config.family)
+        # 东亚字体：优先使用 east_asia_family，否则回退到 family
+        east_asia_font = font_config.east_asia_family or font_config.family
+        r_fonts.set(qn("w:eastAsia"), east_asia_font)
+
+        # 删除线
+        if hasattr(font_config, 'strikethrough') and font_config.strikethrough:
+            strike = rpr.find(qn("w:strike"))
+            if strike is None:
+                strike = rpr.makeelement(qn("w:strike"), {})
+                rpr.append(strike)
+            strike.set(qn("w:val"), "true")
 
         # 颜色
         if font_config.color_hex and font_config.color_hex != "#000000":
@@ -362,6 +406,10 @@ class DocxStyler:
         if "TOC" in style_name or "toc" in style_name:
             return "toc"
 
+        # 检查是否为图表标题
+        if "Caption" in style_name or "caption" in style_name:
+            return "caption"
+
         # 空段落
         if not paragraph.text.strip():
             return "empty"
@@ -402,11 +450,21 @@ class DocxStyler:
             return True
 
     def _set_cell_margins(self, cell, padding_pt: float) -> None:
-        """设置表格单元格内边距
+        """设置表格单元格内边距（向后兼容）
 
         Args:
             cell: python-docx Cell 对象
             padding_pt: 内边距（磅）
+        """
+        self._set_cell_margins_full(cell, None, padding_pt)
+
+    def _set_cell_margins_full(self, cell, ts=None, default_padding: float = 2.0) -> None:
+        """设置表格单元格内边距（四边独立）
+
+        Args:
+            cell: python-docx Cell 对象
+            ts: TableStyleConfig 对象，如果 None 则使用 default_padding
+            default_padding: 默认内边距（磅）
         """
         tc = cell._tc
         tcPr = tc.find(qn("w:tcPr"))
@@ -414,13 +472,148 @@ class DocxStyler:
             tcPr = tc.makeelement(qn("w:tcPr"), {})
             tc.insert(0, tcPr)
 
-        # 设置单元格边距（单位为 twips，1 pt = 20 twips）
-        twips = int(padding_pt * 20)
-        for attr in ["w:top", "w:bottom", "w:start", "w:end"]:
-            tcMar = tcPr.find(qn(f"w:tcMar"))
-            if tcMar is None:
-                tcMar = tcPr.makeelement(qn("w:tcMar"), {})
-                tcPr.append(tcMar)
+        # 获取各边内边距
+        if ts:
+            top = ts.cell_padding_top_pt
+            bottom = ts.cell_padding_bottom_pt
+            left = ts.cell_padding_left_pt
+            right = ts.cell_padding_right_pt
+        else:
+            top = bottom = left = right = default_padding
+
+        # 创建或更新 tcMar
+        tcMar = tcPr.find(qn("w:tcMar"))
+        if tcMar is None:
+            tcMar = tcPr.makeelement(qn("w:tcMar"), {})
+            tcPr.append(tcMar)
+
+        # 设置各边边距（单位为 twips，1 pt = 20 twips）
+        for side, val in [("top", top), ("bottom", bottom), ("start", left), ("end", right)]:
+            elem = tcMar.find(qn(f"w:{side}"))
+            if elem is None:
+                elem = tcMar.makeelement(qn(f"w:{side}"), {})
+                tcMar.append(elem)
+            elem.set(qn("w:w"), str(int(val * 20)))
+            elem.set(qn("w:type"), "dxa")
+
+    def _set_table_alignment(self, table: Table, alignment: str) -> None:
+        """设置表格对齐方式"""
+        tbl = table._tbl
+        tblPr = tbl.find(qn("w:tblPr"))
+        if tblPr is None:
+            tblPr = tbl.makeelement(qn("w:tblPr"), {})
+            tbl.insert(0, tblPr)
+
+        jc = tblPr.find(qn("w:jc"))
+        if jc is None:
+            jc = tblPr.makeelement(qn("w:jc"), {})
+            tblPr.append(jc)
+        jc.set(qn("w:val"), alignment)
+
+    def _set_cell_vertical_alignment(self, cell, alignment: str) -> None:
+        """设置单元格垂直对齐方式"""
+        tc = cell._tc
+        tcPr = tc.find(qn("w:tcPr"))
+        if tcPr is None:
+            tcPr = tc.makeelement(qn("w:tcPr"), {})
+            tc.insert(0, tcPr)
+
+        vAlign = tcPr.find(qn("w:vAlign"))
+        if vAlign is None:
+            vAlign = tcPr.makeelement(qn("w:vAlign"), {})
+            tcPr.append(vAlign)
+        vAlign.set(qn("w:val"), alignment)
+
+    def _set_cell_shading(self, cell, color_hex: str) -> None:
+        """设置单元格背景色"""
+        tc = cell._tc
+        tcPr = tc.find(qn("w:tcPr"))
+        if tcPr is None:
+            tcPr = tc.makeelement(qn("w:tcPr"), {})
+            tc.insert(0, tcPr)
+
+        shd = tcPr.find(qn("w:shd"))
+        if shd is None:
+            shd = tcPr.makeelement(qn("w:shd"), {})
+            tcPr.append(shd)
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), color_hex.lstrip("#"))
+
+    def _set_header_repeat(self, table: Table) -> None:
+        """设置表头行跨页重复"""
+        if not table.rows:
+            return
+        tr = table.rows[0]._tr
+        trPr = tr.find(qn("w:trPr"))
+        if trPr is None:
+            trPr = tr.makeelement(qn("w:trPr"), {})
+            tr.insert(0, trPr)
+        tblHeader = trPr.find(qn("w:tblHeader"))
+        if tblHeader is None:
+            tblHeader = trPr.makeelement(qn("w:tblHeader"), {})
+            trPr.append(tblHeader)
+
+    def _set_table_borders_full(self, table: Table, ts) -> None:
+        """设置表格边框（完整版，支持各边独立线宽）
+
+        Args:
+            table: python-docx Table 对象
+            ts: TableStyleConfig
+        """
+        width_pt = ts.border_width_pt
+        border_style_val = "single"
+        if ts.border_style == "double":
+            border_style_val = "double"
+        elif ts.border_style == "three-line":
+            border_style_val = "single"
+
+        tbl = table._tbl
+        tblPr = tbl.find(qn("w:tblPr"))
+        if tblPr is None:
+            tblPr = tbl.makeelement(qn("w:tblPr"), {})
+            tbl.insert(0, tblPr)
+
+        tblBorders = tblPr.find(qn("w:tblBorders"))
+        if tblBorders is None:
+            tblBorders = tblPr.makeelement(qn("w:tblBorders"), {})
+            tblPr.append(tblBorders)
+
+        # 各边线宽
+        widths = {
+            "top": ts.border_width_top_pt if ts.border_width_top_pt is not None else width_pt,
+            "bottom": ts.border_width_bottom_pt if ts.border_width_bottom_pt is not None else width_pt,
+            "left": ts.border_width_left_pt if ts.border_width_left_pt is not None else width_pt,
+            "right": ts.border_width_right_pt if ts.border_width_right_pt is not None else width_pt,
+            "insideH": ts.border_width_inside_h_pt if ts.border_width_inside_h_pt is not None else width_pt,
+            "insideV": ts.border_width_inside_v_pt if ts.border_width_inside_v_pt is not None else width_pt,
+        }
+
+        for border_name in ["top", "bottom", "left", "right", "insideH", "insideV"]:
+            border = tblBorders.find(qn(f"w:{border_name}"))
+            if border is None:
+                border = tblBorders.makeelement(qn(f"w:{border_name}"), {})
+                tblBorders.append(border)
+
+            border.set(qn("w:val"), border_style_val)
+            border.set(qn("w:sz"), str(int(widths[border_name] * 8)))
+            border.set(qn("w:space"), "0")
+            border.set(qn("w:color"), "000000")
+
+        # 三线表特殊处理
+        if ts.border_style == "three-line":
+            thick_width = int(width_pt * 2 * 8)
+            thin_width = int(0.5 * 8)
+            for border_name in ["top", "bottom"]:
+                border = tblBorders.find(qn(f"w:{border_name}"))
+                if border is not None:
+                    border.set(qn("w:sz"), str(thick_width))
+            for border_name in ["insideH", "insideV", "left", "right"]:
+                border = tblBorders.find(qn(f"w:{border_name}"))
+                if border is not None:
+                    border.set(qn("w:sz"), str(thin_width))
+                    if border_name in ("left", "right"):
+                        border.set(qn("w:val"), "none")
 
     def _set_table_borders(self, table: Table, width_pt: float, style: str) -> None:
         """设置表格边框
