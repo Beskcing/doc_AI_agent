@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
@@ -73,6 +73,33 @@ class LLMClient:
         logger.debug("LLM 调用: provider=%s, prompt_len=%d", self.provider, len(prompt))
 
         response = self._chat_model.invoke(messages)
+        return response.content
+
+    def invoke_messages(self, messages: list[dict]) -> str:
+        """多轮对话调用 LLM
+
+        支持传入完整的消息列表，用于多轮对话场景。
+
+        Args:
+            messages: 消息列表，每条消息为 {"role": "user"|"assistant"|"system", "content": "..."}
+
+        Returns:
+            LLM 响应文本
+        """
+        lc_messages = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "system":
+                lc_messages.append(SystemMessage(content=content))
+            elif role == "assistant":
+                lc_messages.append(AIMessage(content=content))
+            else:
+                lc_messages.append(HumanMessage(content=content))
+
+        logger.debug("LLM 多轮调用: provider=%s, messages_count=%d", self.provider, len(lc_messages))
+
+        response = self._chat_model.invoke(lc_messages)
         return response.content
 
     def invoke_with_schema(

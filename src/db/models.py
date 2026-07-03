@@ -95,3 +95,40 @@ class SystemConfigModel(Base):
 
     def __repr__(self) -> str:
         return f"<SystemConfig(id={self.id})>"
+
+
+class ChatSessionModel(Base):
+    """对话会话表
+
+    保存用户的对话排版会话，支持多轮对话历史持久化。
+    """
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    title: Mapped[str] = mapped_column(String(255), default="新对话")
+    style_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def __repr__(self) -> str:
+        return f"<ChatSession(id={self.id}, title={self.title})>"
+
+
+class ChatMessageModel(Base):
+    """对话消息表
+
+    保存会话中的每条消息（用户/AI），支持多轮对话历史恢复。
+    """
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # user / assistant
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    style_config_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # AI回复时的样式快照
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    def __repr__(self) -> str:
+        return f"<ChatMessage(session={self.session_id}, role={self.role})>"

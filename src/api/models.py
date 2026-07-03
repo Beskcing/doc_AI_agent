@@ -203,6 +203,7 @@ class ChatRequest(BaseModel):
     message: str = Field(description="用户消息")
     current_style_config: dict[str, Any] = Field(description="当前样式配置")
     context: str | None = Field(default=None, description="上下文信息（文档类型等）")
+    session_id: str | None = Field(default=None, description="会话 ID，为空时自动创建新会话")
 
 
 class ChatResponse(BaseModel):
@@ -210,6 +211,42 @@ class ChatResponse(BaseModel):
 
     reply: str = Field(description="AI 回复")
     updated_style_config: dict[str, Any] = Field(description="更新后的样式配置")
+    session_id: str = Field(description="会话 ID")
+
+
+class ChatSessionInfo(BaseModel):
+    """会话信息"""
+
+    id: str = Field(description="会话 ID")
+    title: str = Field(description="会话标题")
+    style_config: dict[str, Any] = Field(description="当前样式配置")
+    message_count: int = Field(default=0, description="消息数量")
+    created_at: datetime = Field(description="创建时间")
+    updated_at: datetime = Field(description="更新时间")
+
+
+class ChatSessionListResponse(PaginatedResponse):
+    """会话列表响应"""
+
+    items: list[ChatSessionInfo] = Field(description="会话列表")
+
+
+class ChatMessageInfo(BaseModel):
+    """消息信息"""
+
+    id: str = Field(description="消息 ID")
+    session_id: str = Field(description="会话 ID")
+    role: str = Field(description="角色: user/assistant")
+    content: str = Field(description="消息内容")
+    style_config_snapshot: dict[str, Any] | None = Field(default=None, description="样式快照")
+    created_at: datetime = Field(description="创建时间")
+
+
+class CreateSessionRequest(BaseModel):
+    """创建会话请求"""
+
+    title: str = Field(default="新对话", description="会话标题")
+    style_config: dict[str, Any] | None = Field(default=None, description="初始样式配置")
 
 
 # ────────── 应用模板 ──────────

@@ -9,7 +9,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from src.db.models import KbDocumentModel, StyleTemplateModel, SystemConfigModel, TaskModel
+from src.db.models import ChatMessageModel, ChatSessionModel, KbDocumentModel, StyleTemplateModel, SystemConfigModel, TaskModel
 
 
 class TaskCRUD:
@@ -209,3 +209,94 @@ class SystemConfigCRUD:
         db.commit()
         db.refresh(config)
         return config
+
+
+class ChatSessionCRUD:
+    """对话会话 CRUD"""
+
+    @staticmethod
+    def create(db: Session, title: str = "新对话", style_config: dict | None = None) -> ChatSessionModel:
+        session = ChatSessionModel(title=title, style_config=style_config or {})
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return session
+
+    @staticmethod
+    def get(db: Session, session_id: str) -> ChatSessionModel | None:
+        return db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
+
+    @staticmethod
+    def list_sessions(db: Session, page: int = 1, page_size: int = 50) -> tuple[list[ChatSessionModel], int]:
+        query = db.query(ChatSessionModel)
+        total = query.count()
+        sessions = query.order_by(ChatSessionModel.updated_at.desc()).offset(
+            (page - 1) * page_size
+        ).limit(page_size).all()
+        return sessions, total
+
+    @staticmethod
+    def update_style_config(db: Session, session_id: str, style_config: dict) -> ChatSessionModel | None:
+        session = db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
+        if not session:
+            return None
+        session.style_config = style_config
+        db.commit()
+        db.refresh(session)
+        return session
+
+    @staticmethod
+    def update_title(db: Session, session_id: str, title: str) -> ChatSessionModel | None:
+        session = db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
+        if not session:
+            return None
+        session.title = title
+        db.commit()
+        db.refresh(session)
+        return session
+
+    @staticmethod
+    def delete(db: Session, session_id: str) -> bool:
+        # 先删除关联的消息
+        db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).delete()
+        session = db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
+        if session:
+            db.delete(session)
+            db.commit()
+            return True
+        return False
+
+
+class ChatMessageCRUD:
+    """对话消息 CRUD"""
+
+    @staticmethod
+    def create(
+        db: Session,
+        session_id: str,
+        role: str,
+        content: str,
+        style_config_snapshot: dict | None = None,
+    ) -> ChatMessageModel:
+        msg = ChatMessageModel(
+            session_id=session_id,
+            role=role,
+            content=content,
+            style_config_snapshot=style_config_snapshot,
+        )
+        db.add(msg)
+        db.commit()
+        db.refresh(msg)
+        return msg
+
+    @staticmethod
+    def list_messages(db: Session, session_id: str, limit: int | None = None) -> list[ChatMessageModel]:
+        query = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id)
+        query = query.order_by(ChatMessageModel.created_at.asc())
+        if limit:
+            query = query.limit(limit)
+        return query.all()
+
+    @staticmethod
+    def count_messages(db: Session, session_id: str) -> int:
+        return db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()

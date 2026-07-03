@@ -129,7 +129,24 @@ export const chatStyle = (data: {
   message: string
   current_style_config: Record<string, unknown>
   context?: string
+  session_id?: string
 }) => api.post('/api/chat/style', data, { timeout: 60000 })
+
+// ────────── 对话会话 ──────────
+export const listChatSessions = (params?: { page?: number; page_size?: number }) =>
+  api.get('/api/chat/sessions', { params })
+
+export const createChatSession = (data?: { title?: string; style_config?: Record<string, unknown> }) =>
+  api.post('/api/chat/sessions', data || {})
+
+export const getChatSession = (sessionId: string) =>
+  api.get(`/api/chat/sessions/${sessionId}`)
+
+export const deleteChatSession = (sessionId: string) =>
+  api.delete(`/api/chat/sessions/${sessionId}`)
+
+export const getChatMessages = (sessionId: string) =>
+  api.get(`/api/chat/sessions/${sessionId}/messages`)
 
 // ────────── 知识库 ──────────
 export const listKbDocuments = (params?: { page?: number; page_size?: number }) =>

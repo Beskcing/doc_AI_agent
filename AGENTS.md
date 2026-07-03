@@ -50,3 +50,4 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-03 | fix | 安装 dashscope SDK，RAG 知识库混合检索（BM25+向量）完全打通 |
 | 2026-07-03 | feat | 新增对话排版模式：LLM对话修改样式+表单编辑器、Word模板上传与格式提取(docx_style_extractor)、样式模板管理(CRUD+DB持久化)、模板应用于新任务和已有任务 |
 | 2026-07-03 | fix | Loop Engineering 全面测试修复6个Bug：Bug#1上传原始文件名丢失(改用.meta元数据文件)、Bug#2知识库同名文件覆盖(改用UUID存储)、Bug#3知识库删除不清理物理文件、Bug#4知识库重建索引空操作(接入真实KB初始化)、Bug#5任务列表轮询间隔不随状态变化、Bug#6任务详情终态后仍高频轮询+下载文件名修复 |
+| 2026-07-03 | feat | 新增多轮对话+上下文窗口管理：ChatSession/ChatMessage DB持久化、会话CRUD API、LLMClient多轮消息支持、上下文窗口状态压缩法(最近N轮+token预算截断)、前端会话列表侧栏+历史恢复+新建/切换/删除会话 |

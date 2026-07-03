@@ -16,6 +16,9 @@ import {
   Tag,
   InputNumber,
   Collapse,
+  List,
+  Popconfirm,
+  Tooltip,
 } from 'antd'
 import {
   UploadOutlined,
@@ -25,6 +28,9 @@ import {
   UserOutlined,
   EyeOutlined,
   ThunderboltOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  MessageOutlined,
 } from '@ant-design/icons'
 import {
   uploadTemplate,
@@ -32,6 +38,10 @@ import {
   chatStyle,
   applyTemplateToTask,
   listTasks,
+  listChatSessions,
+  createChatSession,
+  getChatSession,
+  deleteChatSession,
 } from '../services/api'
 
 const { Text } = Typography
@@ -50,6 +60,15 @@ interface StyleConfig {
   table_style?: Record<string, unknown> | null
   rag_sources?: string[]
   [key: string]: unknown
+}
+
+interface ChatSession {
+  id: string
+  title: string
+  style_config: Record<string, unknown>
+  message_count: number
+  created_at: string
+  updated_at: string
 }
 
 const DEFAULT_STYLE_CONFIG: StyleConfig = {
@@ -96,13 +115,32 @@ const ChatPage: React.FC = () => {
   const [saveForm] = Form.useForm()
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  // 会话管理状态
+  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [currentSessionId, setCurrentSessionId] = useState<string>('')
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [messagesLoading, setMessagesLoading] = useState(false)
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   useEffect(() => {
     loadCompletedTasks()
+    loadSessions()
   }, [])
+
+  const loadSessions = async () => {
+    setSessionsLoading(true)
+    try {
+      const res = await listChatSessions({ page: 1, page_size: 50 })
+      setSessions(res.data.data.items)
+    } catch {
+      // 静默
+    } finally {
+      setSessionsLoading(false)
+    }
+  }
 
   const loadCompletedTasks = async () => {
     try {
@@ -110,6 +148,64 @@ const ChatPage: React.FC = () => {
       setTasks(res.data.data.items.map((t: { id: string; filename: string }) => ({ id: t.id, filename: t.filename })))
     } catch {
       // 静默
+    }
+  }
+
+  const handleNewSession = async () => {
+    try {
+      const res = await createChatSession({ title: '新对话', style_config: styleConfig })
+      const newSession = res.data.data
+      setSessions(prev => [newSession, ...prev])
+      setCurrentSessionId(newSession.id)
+      setMessages([{
+        role: 'assistant',
+        content: '你好！我是排版格式专家。你可以上传 Word 模板自动提取格式，也可以用自然语言告诉我你想要的修改，比如"正文改为仿宋16pt"、"标题居中加粗"。',
+      }])
+      setStyleConfig(DEFAULT_STYLE_CONFIG)
+      message.success('已创建新对话')
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '创建对话失败')
+    }
+  }
+
+  const handleSwitchSession = async (sessionId: string) => {
+    if (sessionId === currentSessionId) return
+    setMessagesLoading(true)
+    try {
+      const res = await getChatSession(sessionId)
+      const { session: sessionData, messages: historyMessages } = res.data.data
+
+      setCurrentSessionId(sessionId)
+      setStyleConfig(sessionData.style_config || DEFAULT_STYLE_CONFIG)
+
+      // 恢复历史消息
+      const restored: ChatMessage[] = historyMessages.map((m: { role: string; content: string }) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      }))
+      setMessages(restored)
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '加载对话失败')
+    } finally {
+      setMessagesLoading(false)
+    }
+  }
+
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      await deleteChatSession(sessionId)
+      setSessions(prev => prev.filter(s => s.id !== sessionId))
+      if (currentSessionId === sessionId) {
+        setCurrentSessionId('')
+        setMessages([{
+          role: 'assistant',
+          content: '你好！我是排版格式专家。你可以上传 Word 模板自动提取格式，也可以用自然语言告诉我你想要的修改，比如"正文改为仿宋16pt"、"标题居中加粗"。',
+        }])
+        setStyleConfig(DEFAULT_STYLE_CONFIG)
+      }
+      message.success('对话已删除')
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '删除失败')
     }
   }
 
@@ -145,11 +241,18 @@ const ChatPage: React.FC = () => {
       const res = await chatStyle({
         message: userMessage,
         current_style_config: styleConfig,
+        session_id: currentSessionId || undefined,
       })
       const data = res.data.data
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
       if (data.updated_style_config) {
         setStyleConfig(data.updated_style_config)
+      }
+      // 更新或设置会话 ID
+      if (data.session_id && !currentSessionId) {
+        setCurrentSessionId(data.session_id)
+        // 刷新会话列表
+        loadSessions()
       }
     } catch (err) {
       setMessages(prev => [...prev, {
@@ -430,7 +533,91 @@ const ChatPage: React.FC = () => {
   return (
     <div style={{ height: 'calc(100vh - 160px)', display: 'flex', flexDirection: 'column' }}>
       <Row gutter={16} style={{ flex: 1, minHeight: 0 }}>
-        {/* 左侧 - 对话区 */}
+        {/* 左侧 - 会话列表 */}
+        <Col span={4} style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <Card
+            size="small"
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
+            styles={{ body: { flex: 1, overflowY: 'auto', padding: '8px' } }}
+            title={
+              <Space>
+                <MessageOutlined />
+                <Text strong>对话列表</Text>
+              </Space>
+            }
+            extra={
+              <Tooltip title="新建对话">
+                <Button
+                  type="text"
+                  icon={<PlusOutlined />}
+                  size="small"
+                  onClick={handleNewSession}
+                />
+              </Tooltip>
+            }
+          >
+            {sessionsLoading ? (
+              <div style={{ textAlign: 'center', padding: 20 }}><Spin /></div>
+            ) : sessions.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>
+                暂无对话记录
+              </div>
+            ) : (
+              <List
+                size="small"
+                dataSource={sessions}
+                renderItem={(session) => (
+                  <List.Item
+                    style={{
+                      cursor: 'pointer',
+                      padding: '8px',
+                      background: session.id === currentSessionId ? '#e6f4ff' : 'transparent',
+                      borderRadius: 4,
+                      marginBottom: 4,
+                    }}
+                    onClick={() => handleSwitchSession(session.id)}
+                    actions={[
+                      <Popconfirm
+                        key="delete"
+                        title="确定删除此对话？"
+                        onConfirm={(e) => {
+                          e?.stopPropagation()
+                          handleDeleteSession(session.id)
+                        }}
+                        onCancel={(e) => e?.stopPropagation()}
+                        okText="确定"
+                        cancelText="取消"
+                      >
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          onClick={(e) => e.stopPropagation()}
+                          danger
+                        />
+                      </Popconfirm>,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      title={
+                        <Text ellipsis style={{ maxWidth: 120, display: 'inline-block' }}>
+                          {session.title}
+                        </Text>
+                      }
+                      description={
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {session.message_count} 条消息
+                        </Text>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            )}
+          </Card>
+        </Col>
+
+        {/* 中间 - 对话区 */}
         <Col span={12} style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <Card
             size="small"
@@ -440,6 +627,11 @@ const ChatPage: React.FC = () => {
               <Space>
                 <RobotOutlined />
                 <Text strong>对话排版助手</Text>
+                {currentSessionId && (
+                  <Tag color="blue" style={{ marginLeft: 8 }}>
+                    {sessions.find(s => s.id === currentSessionId)?.title || '对话中'}
+                  </Tag>
+                )}
               </Space>
             }
             extra={
@@ -463,66 +655,74 @@ const ChatPage: React.FC = () => {
               </Space>
             }
           >
-            {/* 消息列表 */}
-            <div style={{ flex: 1, overflowY: 'auto', marginBottom: 12 }}>
-              {messages.map((msg, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: 'flex',
-                    flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
-                    marginBottom: 12,
-                  }}
-                >
-                  <div
-                    style={{
-                      maxWidth: '80%',
-                      padding: '8px 12px',
-                      borderRadius: 8,
-                      background: msg.role === 'user' ? '#e6f4ff' : '#f5f5f5',
-                      marginLeft: msg.role === 'user' ? 8 : 0,
-                      marginRight: msg.role === 'user' ? 0 : 8,
-                    }}
-                  >
-                    {msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
-                    <span style={{ marginLeft: 6, whiteSpace: 'pre-wrap' }}>{msg.content}</span>
-                  </div>
+            {messagesLoading ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Spin tip="加载对话历史..." />
+              </div>
+            ) : (
+              <>
+                {/* 消息列表 */}
+                <div style={{ flex: 1, overflowY: 'auto', marginBottom: 12 }}>
+                  {messages.map((msg, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'flex',
+                        flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
+                        marginBottom: 12,
+                      }}
+                    >
+                      <div
+                        style={{
+                          maxWidth: '80%',
+                          padding: '8px 12px',
+                          borderRadius: 8,
+                          background: msg.role === 'user' ? '#e6f4ff' : '#f5f5f5',
+                          marginLeft: msg.role === 'user' ? 8 : 0,
+                          marginRight: msg.role === 'user' ? 0 : 8,
+                        }}
+                      >
+                        {msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
+                        <span style={{ marginLeft: 6, whiteSpace: 'pre-wrap' }}>{msg.content}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {chatLoading && (
+                    <div style={{ textAlign: 'center', padding: 12 }}>
+                      <Spin size="small" />
+                      <Text type="secondary" style={{ marginLeft: 8 }}>AI 思考中...</Text>
+                    </div>
+                  )}
+                  <div ref={messagesEndRef} />
                 </div>
-              ))}
-              {chatLoading && (
-                <div style={{ textAlign: 'center', padding: 12 }}>
-                  <Spin size="small" />
-                  <Text type="secondary" style={{ marginLeft: 8 }}>AI 思考中...</Text>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
 
-            {/* 输入区 */}
-            <div style={{ flexShrink: 0 }}>
-              <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  value={inputValue}
-                  onChange={e => setInputValue(e.target.value)}
-                  onPressEnter={handleSendMessage}
-                  placeholder="输入排版修改需求，如：正文改为仿宋16pt，标题居中..."
-                  disabled={chatLoading}
-                />
-                <Button
-                  type="primary"
-                  icon={<SendOutlined />}
-                  onClick={handleSendMessage}
-                  loading={chatLoading}
-                >
-                  发送
-                </Button>
-              </Space.Compact>
-            </div>
+                {/* 输入区 */}
+                <div style={{ flexShrink: 0 }}>
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Input
+                      value={inputValue}
+                      onChange={e => setInputValue(e.target.value)}
+                      onPressEnter={handleSendMessage}
+                      placeholder="输入排版修改需求，如：正文改为仿宋16pt，标题居中..."
+                      disabled={chatLoading}
+                    />
+                    <Button
+                      type="primary"
+                      icon={<SendOutlined />}
+                      onClick={handleSendMessage}
+                      loading={chatLoading}
+                    >
+                      发送
+                    </Button>
+                  </Space.Compact>
+                </div>
+              </>
+            )}
           </Card>
         </Col>
 
         {/* 右侧 - 样式编辑区 */}
-        <Col span={12} style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <Col span={8} style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <Card
             size="small"
             style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
