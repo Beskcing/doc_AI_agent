@@ -258,6 +258,12 @@ class TaskManager:
             cleaned_markdown = self._clean_markdown(task_id, markdown_content, extract_dir)
 
             # 存储完整清洗后的 Markdown（供预览使用）
+            # 同时写入文件和数据库，文件作为降级回读数据源
+            result_dir = Path("data/output") / task_id
+            result_dir.mkdir(parents=True, exist_ok=True)
+            cleaned_md_path = result_dir / "cleaned.md"
+            cleaned_md_path.write_text(cleaned_markdown, encoding="utf-8")
+
             db = _get_db()
             try:
                 task_db = TaskCRUD.get(db, task_id)
@@ -416,7 +422,9 @@ class TaskManager:
     def get_docx_html_preview(self, task_id: str) -> str | None:
         """将任务生成的 DOCX 转换为 HTML 供前端预览
 
-        使用 Pandoc 将 DOCX 转换为 HTML，保留表格、图片等格式。
+        使用 Pandoc 将 DOCX 转换为 HTML fragment，保留表格、图片等格式。
+        不使用 --standalone/--embed-resources，生成轻量 HTML 片段，
+        避免大文件 base64 编码导致内容过重被截断。
         """
         task = self.get_task(task_id)
         if not task or not task.result_path:
@@ -432,7 +440,7 @@ class TaskManager:
                 str(result_path),
                 "html",
                 format="docx",
-                extra_args=["--standalone", "--embed-resources"],
+                extra_args=["--wrap=none"],
             )
             logger.info("任务 %s: DOCX→HTML 预览生成成功, %d 字符", task_id, len(html))
             return html

@@ -196,8 +196,6 @@ const TaskDetailPage: React.FC = () => {
       children: preview ? (
         <Card loading={previewLoading}>
           <div style={{
-            maxHeight: 700,
-            overflow: 'auto',
             padding: '8px 16px',
           }}>
             {preview.markdown_preview ? (
@@ -267,7 +265,8 @@ const TaskDetailPage: React.FC = () => {
                 src={getDocxPreviewUrl(taskId!)}
                 style={{
                   width: '100%',
-                  height: '70vh',
+                  height: 'calc(100vh - 200px)',
+                  minHeight: 600,
                   border: 'none',
                 }}
                 title="Word 文档预览"

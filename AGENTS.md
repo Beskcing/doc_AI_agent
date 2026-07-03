@@ -58,6 +58,26 @@
  - 远程仓库地址：`https://github.com/Beskcing/doc_AI_agent.git`
  - 提交后执行 `git push origin master` 推送到远程仓库。
 
+## 变更记录
+
+### 2026-07-03: fix: 修复预览内容截断问题
+ - **变更文件**：`src/api/services/task_manager.py`、`src/api/routers/tasks.py`、`frontend/src/pages/TaskDetailPage.tsx`、`frontend/src/services/api.ts`
+ - **变更内容**：
+   - 后端：任务处理时将完整 cleaned markdown 保存到 `data/output/{task_id}/cleaned.md` 文件
+   - 后端：预览接口增加文件回读降级逻辑，旧任务截断数据自动从文件补全
+   - 后端：DOCX→HTML 转换移除 `--standalone`/`--embed-resources`，改用轻量 fragment HTML 避免大文件截断
+   - 前端：移除 Markdown 预览 `maxHeight: 700` 限制，内容完整展示
+   - 前端：Word 预览 iframe 高度从 `70vh` 改为 `calc(100vh - 200px)` 并设 `minHeight: 600`
+   - 前端：预览 API 请求超时从 30s 加长到 120s
+
+### 2026-07-03: feat: 新增任务删除功能、Word文档预览、Markdown完整渲染
+ - **变更文件**：`src/api/services/task_manager.py`、`src/api/routers/tasks.py`、`frontend/src/pages/TasksPage.tsx`、`frontend/src/pages/TaskDetailPage.tsx`、`frontend/src/services/api.ts`、`frontend/package.json`
+ - **变更内容**：
+   - 任务管理：新增删除任务功能（后端 DELETE `/api/tasks/{task_id}` 接口 + 前端按钮）
+   - Word 预览：新增 DOCX→HTML 转换接口 `GET /api/tasks/{task_id}/preview/docx`，前端 iframe 渲染
+   - Markdown 预览：移除 2000 字符截断，使用 `react-markdown` + `remark-gfm` 完整渲染
+   - 新增前端依赖：`react-markdown`、`remark-gfm`
+
 ## Definition of Done (完成标准)
  一个功能被视为"完成"，必须满足：
  - [ ] LLM 输出的 JSON 格式稳定，且能通过 JSON Schema 校验。

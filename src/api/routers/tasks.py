@@ -203,9 +203,32 @@ async def preview_result(task_id: str) -> ResponseModel:
     task = task_manager.get_task(task_id)
     if not task:
         return ResponseModel(code=404, message="任务不存在")
+
+    markdown_preview = task.cleaned_markdown_preview
+
+    # 降级逻辑：如果数据库中的预览内容过短（旧任务被截断），
+    # 尝试从输出目录的 cleaned.md 文件读取完整内容
+    if not markdown_preview or len(markdown_preview) <= 2000:
+        cleaned_md_path = Path("data/output") / task_id / "cleaned.md"
+        if cleaned_md_path.exists():
+            markdown_preview = cleaned_md_path.read_text(encoding="utf-8")
+            # 同步更新数据库
+            task.cleaned_markdown_preview = markdown_preview
+            from src.db.database import SessionLocal
+            db = SessionLocal()
+            try:
+                from src.db.crud import TaskCRUD
+                TaskCRUD.update_status(db, task_id)  # 触发更新
+                t = TaskCRUD.get(db, task_id)
+                if t:
+                    t.cleaned_markdown_preview = markdown_preview
+                    db.commit()
+            finally:
+                db.close()
+
     return ResponseModel(
         data={
-            "markdown_preview": task.cleaned_markdown_preview,
+            "markdown_preview": markdown_preview,
             "style_config": task.style_config_preview,
         },
     )
