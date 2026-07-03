@@ -366,7 +366,10 @@ class TaskManager:
 
                 if ext == ".pdf":
                     # PDF 文件：使用 MinerU 解析
-                    markdown_content, extract_dir = self._parse_with_mineru(task_id, file_path)
+                    markdown_content, extract_dir, mineru_docx_path = self._parse_with_mineru(task_id, file_path)
+                    # 保存 MinerU DOCX 路径到任务配置
+                    if mineru_docx_path:
+                        self._save_mineru_docx_path(task_id, mineru_docx_path)
                 elif ext in (".md", ".txt"):
                     # Markdown/TXT 文件：直接读取
                     markdown_content = Path(file_path).read_text(encoding="utf-8")
@@ -510,13 +513,14 @@ class TaskManager:
             logger.error("任务 %s: LLM 样式提取失败，降级为默认配置: %s", task_id, e)
             return self._default_style_config()
 
-    def _parse_with_mineru(self, task_id: str, file_path: str) -> tuple[str, str]:
+    def _parse_with_mineru(self, task_id: str, file_path: str) -> tuple[str, str, str | None]:
         """使用 MinerU 解析 PDF 文件
 
         根据 config.mineru.mode 选择 online 或 local 模式。
+        online 模式时自动请求 extra_formats=["docx"] 以获取 MinerU 原始 DOCX。
 
         Returns:
-            (markdown_content, extract_dir): 解析后的 Markdown 和资源解压目录
+            (markdown_content, extract_dir, mineru_docx_path): 解析后的 Markdown、资源解压目录、MinerU DOCX 路径
         """
         mineru_cfg = _config.mineru
         output_dir = Path("data/output") / task_id
@@ -546,19 +550,52 @@ class TaskManager:
             )
 
             logger.info("任务 %s: MinerU 解析 PDF: %s (mode=%s)", task_id, file_path, mineru_cfg.mode)
-            parsed_doc = parser.parse_pdf(file_path, on_progress=on_progress)
+            # online 模式时请求 extra_formats=["docx"] 以获取 MinerU 原始 DOCX
+            extra_formats = ["docx"] if mineru_cfg.mode == "online" else None
+            parsed_doc = parser.parse_pdf(file_path, on_progress=on_progress, extra_formats=extra_formats)
             markdown_content = parsed_doc.raw_markdown
             extract_dir = parsed_doc.metadata.get("extract_dir", str(output_dir))
+            mineru_docx_path = parsed_doc.metadata.get("mineru_docx_path")
 
-            logger.info("任务 %s: MinerU 解析完成, Markdown %d 字符", task_id, len(markdown_content))
-            return markdown_content, extract_dir
+            logger.info(
+                "任务 %s: MinerU 解析完成, Markdown %d 字符, DOCX=%s",
+                task_id, len(markdown_content), mineru_docx_path or "无",
+            )
+            return markdown_content, extract_dir, mineru_docx_path
 
         except Exception as e:
             logger.error("任务 %s: MinerU 解析失败: %s", task_id, e)
             raise
 
+    def _save_mineru_docx_path(self, task_id: str, mineru_docx_path: str) -> None:
+        """将 MinerU 提供的 DOCX 文件路径保存到任务配置中"""
+        from sqlalchemy.orm.attributes import flag_modified
+        db = _get_db()
+        try:
+            task_db = TaskCRUD.get(db, task_id)
+            if task_db:
+                # 创建新 dict 以确保 SQLAlchemy 检测到 JSON 列变化
+                new_config = {**(task_db.config or {}), "mineru_docx_path": mineru_docx_path}
+                task_db.config = new_config
+                db.commit()
+                logger.info("任务 %s: 已保存 MinerU DOCX 路径: %s", task_id, mineru_docx_path)
+        finally:
+            db.close()
+
+    def get_mineru_docx_path(self, task_id: str) -> str | None:
+        """获取 MinerU 提供的 DOCX 文件路径"""
+        task = self.get_task(task_id)
+        if not task:
+            return None
+        config = task.config or {}
+        docx_path = config.get("mineru_docx_path")
+        if docx_path and Path(docx_path).exists():
+            return docx_path
+        return None
+
     def to_info_dict(self, task: TaskModel) -> dict:
         """转换为 API 响应字典"""
+        config = task.config or {}
         return {
             "id": task.id,
             "upload_id": task.upload_id,
@@ -572,6 +609,7 @@ class TaskManager:
             "completed_at": task.completed_at.isoformat() if task.completed_at else None,
             "error_message": task.error_message,
             "file_size_mb": task.file_size_mb,
+            "mineru_docx_available": bool(config.get("mineru_docx_path")),
         }
 
     def to_detail_dict(self, task: TaskModel) -> dict:

@@ -197,6 +197,35 @@ async def download_file(task_id: str):
     )
 
 
+@router.get("/{task_id}/download/mineru-docx")
+async def download_mineru_docx(task_id: str):
+    """下载 MinerU 提供的原始 DOCX 文件
+
+    MinerU 线上 API 支持 extra_formats=["docx"] 时，
+    会在解析结果 ZIP 中包含原始排版 DOCX 文件。
+    """
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.status != "completed":
+        raise HTTPException(status_code=400, detail="任务尚未完成")
+
+    docx_path = task_manager.get_mineru_docx_path(task_id)
+    if not docx_path:
+        raise HTTPException(status_code=404, detail="MinerU 未提供 DOCX 文件或文件已不存在")
+
+    docx_file = Path(docx_path)
+    # 使用原文件名，格式化为 <原始PDF名>_MinerU.docx
+    original_stem = Path(task.filename).stem
+    download_name = f"{original_stem}_MinerU.docx"
+
+    return FileResponse(
+        path=str(docx_file),
+        filename=download_name,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
 @router.get("/{task_id}/preview", response_model=ResponseModel)
 async def preview_result(task_id: str) -> ResponseModel:
     """预览任务结果"""

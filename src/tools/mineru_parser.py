@@ -75,6 +75,7 @@ class MinerUParser:
         self,
         pdf_path: str | Path,
         on_progress: Any | None = None,
+        extra_formats: list[str] | None = None,
     ) -> ParsedDocument:
         """解析 PDF 文件为结构化 Markdown
 
@@ -85,6 +86,7 @@ class MinerUParser:
         Args:
             pdf_path: PDF 文件路径
             on_progress: 进度回调函数 (stage, info) -> None（仅 online 模式）
+            extra_formats: 额外输出格式，如 ["docx"]（仅 online 模式）
 
         Returns:
             ParsedDocument 实例
@@ -99,22 +101,28 @@ class MinerUParser:
             raise FileNotFoundError(f"PDF 文件不存在: {pdf_path}")
 
         if self.mode == "online":
-            return self._parse_pdf_online(pdf_path, on_progress)
+            return self._parse_pdf_online(pdf_path, on_progress, extra_formats)
         else:
             return self._parse_pdf_local(pdf_path)
 
-    def _parse_pdf_online(self, pdf_path: Path, on_progress: Any | None = None) -> ParsedDocument:
+    def _parse_pdf_online(
+        self,
+        pdf_path: Path,
+        on_progress: Any | None = None,
+        extra_formats: list[str] | None = None,
+    ) -> ParsedDocument:
         """通过线上 API 解析 PDF"""
         if not self._api_client:
             raise RuntimeError("online 模式未初始化 API 客户端")
 
         output_dir = self.output_dir or (pdf_path.parent / f"{pdf_path.stem}_mineru_output")
 
-        logger.info("[online] 开始解析 PDF: %s", pdf_path)
+        logger.info("[online] 开始解析 PDF: %s (extra_formats=%s)", pdf_path, extra_formats)
         result = self._api_client.parse_file(
             pdf_path,
             output_dir=output_dir,
             model_version=self.model_version,
+            extra_formats=extra_formats,
             on_progress=on_progress,
         )
 
@@ -134,6 +142,8 @@ class MinerUParser:
         doc.metadata["parse_mode"] = "online"
         doc.metadata["model_version"] = self.model_version
         doc.metadata["extract_dir"] = str(extract_dir)
+        # MinerU 提供的 DOCX 文件路径（extra_formats=["docx"] 时可用）
+        doc.metadata["mineru_docx_path"] = result.get("mineru_docx_path")
         return doc
 
     def _parse_pdf_local(self, pdf_path: Path) -> ParsedDocument:

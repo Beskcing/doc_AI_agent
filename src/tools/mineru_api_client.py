@@ -167,6 +167,7 @@ class MinerUAPIClient:
         language: str = "ch",
         page_ranges: str | None = None,
         data_id: str | None = None,
+        extra_formats: list[str] | None = None,
     ) -> tuple[str, str]:
         """通过本地文件上传提交解析任务
 
@@ -214,6 +215,9 @@ class MinerUAPIClient:
             "enable_table": enable_table,
             "language": language,
         }
+        # extra_formats 在请求体顶层，不在 files 数组中
+        if extra_formats:
+            payload["extra_formats"] = extra_formats
 
         logger.info("申请上传链接: %s (model=%s)", file_name, model_version)
         resp = requests.post(url, headers=self._headers, json=payload, timeout=self.timeout)
@@ -423,9 +427,10 @@ class MinerUAPIClient:
         except zipfile.BadZipFile as e:
             raise RuntimeError(f"ZIP 解压失败: {e}") from e
 
-        # 查找 Markdown 文件
+        # 查找 Markdown、DOCX 文件
         md_files = [f for f in names if f.endswith(".md")]
         json_files = [f for f in names if f.endswith(".json")]
+        docx_files = [f for f in names if f.endswith(".docx") and "formatted" not in f.lower()]
         # 推断图片目录：查找路径中包含 images 的目录名
         image_dirs = set()
         for f in names:
@@ -445,6 +450,18 @@ class MinerUAPIClient:
 
         logger.info("解压完成: %d 文件, markdown=%s", len(names), markdown_path)
 
+        # 查找 MinerU 提供的 DOCX 文件（extra_formats 输出）
+        mineru_docx_path = None
+        if docx_files:
+            # 优先查找名为 full.docx 的文件
+            for f in docx_files:
+                if Path(f).name == "full.docx":
+                    mineru_docx_path = str(output_dir / f)
+                    break
+            if not mineru_docx_path:
+                mineru_docx_path = str(output_dir / docx_files[0])
+            logger.info("MinerU DOCX 文件: %s", mineru_docx_path)
+
         return {
             "markdown_path": markdown_path,
             "markdown_content": Path(markdown_path).read_text(encoding="utf-8") if markdown_path else "",
@@ -452,6 +469,7 @@ class MinerUAPIClient:
             "image_dir": str(output_dir / image_dirs[0]) if image_dirs else None,
             "all_files": names,
             "extract_dir": str(output_dir),
+            "mineru_docx_path": mineru_docx_path,
         }
 
     # ──────────────────────────────────────────────
@@ -468,6 +486,7 @@ class MinerUAPIClient:
         enable_table: bool = True,
         language: str = "ch",
         page_ranges: str | None = None,
+        extra_formats: list[str] | None = None,
         on_progress: Any | None = None,
     ) -> dict[str, Any]:
         """一步到位：上传本地文件 → 轮询 → 下载 → 提取 Markdown
@@ -505,6 +524,7 @@ class MinerUAPIClient:
             enable_table=enable_table,
             language=language,
             page_ranges=page_ranges,
+            extra_formats=extra_formats,
         )
 
         zip_url = self.wait_for_batch(batch_id, file_name, on_progress=on_progress)

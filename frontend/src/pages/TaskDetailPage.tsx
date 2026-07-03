@@ -24,7 +24,7 @@ import {
   FileTextOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask } from '../services/api'
+import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl } from '../services/api'
 
 interface TaskDetail {
   id: string
@@ -40,6 +40,7 @@ interface TaskDetail {
   result_path: string | null
   cleaned_markdown_preview: string | null
   style_config_preview: Record<string, unknown> | null
+  mineru_docx_available: boolean
 }
 
 const statusColor: Record<string, string> = {
@@ -139,6 +140,11 @@ const TaskDetailPage: React.FC = () => {
   const handleDownload = () => {
     if (!taskId) return
     window.open(getDownloadUrl(taskId), '_blank')
+  }
+
+  const handleMineruDocxDownload = () => {
+    if (!taskId) return
+    window.open(getMineruDocxDownloadUrl(taskId), '_blank')
   }
 
   const handleRetry = async () => {
@@ -304,6 +310,11 @@ const TaskDetailPage: React.FC = () => {
               <Button type="primary" icon={<DownloadOutlined />} onClick={handleDownload}>
                 下载 Word
               </Button>
+              {task.mineru_docx_available && (
+                <Button icon={<FileWordOutlined />} onClick={handleMineruDocxDownload}>
+                  MinerU 原始 DOCX
+                </Button>
+              )}
             </>
           )}
           {task.status === 'failed' && (

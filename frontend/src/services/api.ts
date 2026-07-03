@@ -68,6 +68,8 @@ export const getDownloadInfo = (taskId: string) => api.get(`/api/tasks/${taskId}
 
 export const getDownloadUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/download/file`
 
+export const getMineruDocxDownloadUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/download/mineru-docx`
+
 // ────────── 知识库 ──────────
 export const listKbDocuments = (params?: { page?: number; page_size?: number }) =>
   api.get('/api/kb/documents', { params })
