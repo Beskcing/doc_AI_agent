@@ -967,20 +967,23 @@ class TaskManager:
         return None
 
     def get_pdf_page_images(
-        self, task_id: str, dpi: int = 150, max_pages: int = 0
-    ) -> list[dict] | None:
-        """将原始 PDF 每页渲染为 base64 PNG 图片
+        self, task_id: str, dpi: int = 150,
+        page: int = 1, page_size: int = 5,
+    ) -> dict | None:
+        """将原始 PDF 指定页渲染为 base64 PNG 图片（分页加载）
 
-        使用 PyMuPDF (fitz) 将 PDF 逐页转为图片，供前端在可滚动容器中展示。
-        前端可监听滚动事件实现与编辑区域的同步滚动。
+        Bug 修复：原实现一次性返回所有页面的 base64 图片，
+        大 PDF（20+页）会产生 50MB+ 响应导致浏览器崩溃。
+        现改为分页加载，默认每次返回 5 页。
 
         Args:
             task_id: 任务 ID
             dpi: 渲染分辨率，默认 150（平衡清晰度和性能）
-            max_pages: 最大页数，0 表示不限制
+            page: 页码（从 1 开始）
+            page_size: 每次返回的页数，默认 5
 
         Returns:
-            [{"page": 1, "image": "data:image/png;base64,..."}, ...] 或 None
+            {"pages": [...], "total_pages": N} 或 None
         """
         pdf_path = self.get_original_pdf_path(task_id)
         if not pdf_path:
@@ -991,14 +994,23 @@ class TaskManager:
             import base64
 
             doc = fitz.open(pdf_path)
+            total_pages = len(doc)
+
+            # 分页计算
+            if page_size > 0:
+                start = (page - 1) * page_size
+                end = min(start + page_size, total_pages)
+            else:
+                start = 0
+                end = total_pages
+
             pages = []
-            page_count = len(doc) if max_pages == 0 else min(len(doc), max_pages)
             zoom = dpi / 72  # 72 是 PDF 默认 DPI
             mat = fitz.Matrix(zoom, zoom)
 
-            for i in range(page_count):
-                page = doc[i]
-                pix = page.get_pixmap(matrix=mat)
+            for i in range(start, end):
+                page_obj = doc[i]
+                pix = page_obj.get_pixmap(matrix=mat)
                 img_bytes = pix.tobytes("png")
                 img_b64 = base64.b64encode(img_bytes).decode("ascii")
                 pages.append({
@@ -1009,8 +1021,9 @@ class TaskManager:
                 })
 
             doc.close()
-            logger.info("任务 %s: PDF 转图片成功，共 %d 页", task_id, len(pages))
-            return pages
+            logger.info("任务 %s: PDF 转图片成功，共 %d 页，返回第 %d-%d 页",
+                        task_id, total_pages, start + 1, end)
+            return {"pages": pages, "total_pages": total_pages}
         except Exception as e:
             logger.error("任务 %s: PDF 转图片失败: %s", task_id, e)
             return None

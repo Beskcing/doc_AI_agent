@@ -166,11 +166,14 @@ const TaskDetailPage: React.FC = () => {
   const [contentSaving, setContentSaving] = useState(false)
   const [contentLoaded, setContentLoaded] = useState(false)
 
-  // PDF 对比预览
+  // PDF 对比预览（分页加载）
   const [pdfPages, setPdfPages] = useState<Array<{ page: number; image: string; width: number; height: number }>>([])
   const [pdfLoading, setPdfLoading] = useState(false)
   const [pdfLoaded, setPdfLoaded] = useState(false)
   const [syncScroll, setSyncScroll] = useState(true)
+  const [pdfTotalPages, setPdfTotalPages] = useState(0)
+  const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
+  const pdfPageSize = 5
 
   // 同步滚动 refs
   const pdfScrollRef = useRef<HTMLDivElement>(null)
@@ -373,21 +376,43 @@ const TaskDetailPage: React.FC = () => {
     }
   }
 
-  // 加载原始 PDF 页面图片
+  // 加载原始 PDF 页面图片（分页加载，首次加载前 5 页）
   const handleLoadPdfPages = async () => {
     if (!taskId) return
     setPdfLoading(true)
     try {
-      const res = await getOriginalPdfPages(taskId)
+      const res = await getOriginalPdfPages(taskId, 1, pdfPageSize)
       const pages = res.data.data?.pages || []
+      const totalPages = res.data.data?.total_pages || 0
       if (pages.length === 0) {
         message.warning('该任务无原始 PDF 文件（可能上传的是 Markdown/TXT）')
         return
       }
       setPdfPages(pages)
+      setPdfTotalPages(totalPages)
+      setPdfCurrentPage(1)
       setPdfLoaded(true)
     } catch (err) {
       message.error(err instanceof Error ? err.message : '加载 PDF 预览失败')
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+
+  // 加载更多 PDF 页面
+  const handleLoadMorePdfPages = async () => {
+    if (!taskId) return
+    const nextPage = pdfCurrentPage + 1
+    setPdfLoading(true)
+    try {
+      const res = await getOriginalPdfPages(taskId, nextPage, pdfPageSize)
+      const newPages = res.data.data?.pages || []
+      if (newPages.length > 0) {
+        setPdfPages(prev => [...prev, ...newPages])
+        setPdfCurrentPage(nextPage)
+      }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '加载更多 PDF 页面失败')
     } finally {
       setPdfLoading(false)
     }
@@ -701,6 +726,17 @@ const TaskDetailPage: React.FC = () => {
                       />
                     </div>
                   ))}
+                  {pdfPages.length < pdfTotalPages && (
+                    <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                      <Button
+                        size="small"
+                        onClick={handleLoadMorePdfPages}
+                        loading={pdfLoading}
+                      >
+                        加载更多（{pdfPages.length}/{pdfTotalPages} 页）
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div style={{

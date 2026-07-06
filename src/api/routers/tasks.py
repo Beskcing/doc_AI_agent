@@ -348,11 +348,20 @@ async def preview_docx(task_id: str):
 
 
 @router.get("/{task_id}/preview/original-pdf")
-async def preview_original_pdf(task_id: str):
-    """预览原始 PDF 文件（返回页面图片列表）
+async def preview_original_pdf(
+    task_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=5, ge=1, le=20),
+):
+    """预览原始 PDF 文件（返回页面图片列表，分页加载）
 
-    使用 PyMuPDF 将 PDF 每页渲染为 base64 PNG 图片，
-    供前端在可滚动容器中展示并实现同步滚动。
+    Bug 修复：原实现一次性返回所有页面的 base64 图片，
+    大 PDF 会产生 50MB+ 响应导致浏览器崩溃。
+    现改为分页加载，默认每次返回 5 页，前端可增量加载。
+
+    Args:
+        page: 页码（从 1 开始）
+        page_size: 每次返回的页数（1-20，默认 5）
     """
     task = task_manager.get_task(task_id)
     if not task:
@@ -360,11 +369,17 @@ async def preview_original_pdf(task_id: str):
     if task.status != "completed":
         raise HTTPException(status_code=400, detail="任务尚未完成")
 
-    pages = await run_in_threadpool(task_manager.get_pdf_page_images, task_id)
-    if not pages:
+    result = await run_in_threadpool(
+        task_manager.get_pdf_page_images, task_id, 150, page, page_size,
+    )
+    if not result:
         raise HTTPException(status_code=404, detail="原始 PDF 不存在或转换失败")
 
-    return ResponseModel(data={"pages": pages, "total": len(pages)})
+    return ResponseModel(data={
+        "pages": result["pages"],
+        "total": len(result["pages"]),
+        "total_pages": result["total_pages"],
+    })
 
 
 @router.get("/{task_id}/preview/mineru-docx")
