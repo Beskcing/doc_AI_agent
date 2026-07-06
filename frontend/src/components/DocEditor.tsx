@@ -20,7 +20,6 @@ import 'tinymce/plugins/image'
 import 'tinymce/plugins/table'
 import 'tinymce/plugins/code'
 import 'tinymce/plugins/wordcount'
-import 'tinymce/plugins/undoeditor'
 
 interface DocEditorProps {
   /** 初始 HTML 内容 */
@@ -59,7 +58,7 @@ export default function DocEditor({ initialHtml, onChange, disabled }: DocEditor
         menubar: 'file edit view insert format tools table',
         plugins: [
           'advlist', 'autolink', 'lists', 'link', 'image',
-          'table', 'code', 'wordcount', 'undoeditor',
+          'table', 'code', 'wordcount',
         ],
         toolbar: [
           'undo redo | styles fontfamily fontsize | bold italic underline strikethrough | forecolor backcolor',
