@@ -260,7 +260,7 @@ const ChatPage: React.FC = () => {
         const data = res.data.data
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: `✅ ${data.reply || '内容已修改'}\n\n文档内容已更新并重新生成 DOCX。`,
+          content: `✅ ${data.reply || '内容已修改'}\n\n文档内容已更新，以 MinerU 原始 DOCX 为基础重新应用样式。`,
         }])
       } else {
         // 样式编辑模式（原有逻辑）

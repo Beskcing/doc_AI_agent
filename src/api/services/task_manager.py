@@ -1299,10 +1299,16 @@ class TaskManager:
 
         # 重新生成 DOCX（Markdown 输入时）
         if regenerate_docx and content_type == "markdown":
-            # 获取 extract_dir（图片目录）
-            config = task.config or {}
-            extract_dir = config.get("extract_dir", str(result_dir))
-            docx_path = self._convert_to_docx(task_id, markdown_content, extract_dir)
+            # 优先使用 MinerU 原始 DOCX 作为基础（不使用 Pandoc 转换）
+            mineru_docx = self.get_mineru_docx_path(task_id)
+            if mineru_docx and Path(mineru_docx).exists():
+                docx_path = mineru_docx
+                logger.info("任务 %s: Markdown 保存后使用 MinerU 原始 DOCX 作为基础", task_id)
+            else:
+                # 回退：非 PDF 文件使用 Pandoc MD→DOCX
+                config = task.config or {}
+                extract_dir = config.get("extract_dir", str(result_dir))
+                docx_path = self._convert_to_docx(task_id, markdown_content, extract_dir)
 
         # 应用样式
         styled_path = None
@@ -1327,21 +1333,34 @@ class TaskManager:
         }
 
     def get_content_html(self, task_id: str) -> str | None:
-        """将任务的 cleaned Markdown 转换为 HTML 供富文本编辑器加载
+        """加载文档内容为 HTML 供富文本编辑器使用
 
-        Args:
-            task_id: 任务 ID
-
-        Returns:
-            HTML 字符串，或 None（任务不存在/无内容）
+        优先从 MinerU 原始 DOCX 转换（保留原始排版），
+        回退到 cleaned Markdown → HTML。
         """
         task = self.get_task(task_id)
         if not task:
             return None
 
+        # 优先：MinerU 原始 DOCX → HTML
+        mineru_docx = self.get_mineru_docx_path(task_id)
+        if mineru_docx and Path(mineru_docx).exists():
+            try:
+                import pypandoc
+                html = pypandoc.convert_file(
+                    str(mineru_docx),
+                    "html",
+                    format="docx",
+                    extra_args=["--wrap=none", "--standalone", "--embed-resources"],
+                )
+                logger.info("任务 %s: MinerU DOCX→HTML 加载成功, %d 字符", task_id, len(html))
+                return html
+            except Exception as e:
+                logger.warning("任务 %s: MinerU DOCX→HTML 转换失败: %s", task_id, e)
+
+        # 回退：cleaned Markdown → HTML
         markdown_content = task.cleaned_markdown_preview
         if not markdown_content:
-            # 尝试从文件读取
             result_dir = Path("data/output") / task_id
             md_path = result_dir / "cleaned.md"
             if md_path.exists():
@@ -1360,7 +1379,6 @@ class TaskManager:
             return html
         except Exception as e:
             logger.warning("任务 %s: Markdown→HTML 转换失败: %s", task_id, e)
-            # 回退：简单的 Markdown→HTML 转换
             return f"<pre>{markdown_content}</pre>"
 
     def _html_to_markdown(self, html: str, task_id: str) -> str:
@@ -1374,7 +1392,33 @@ class TaskManager:
             return html
 
     def _html_to_docx(self, task_id: str, html: str) -> str:
-        """HTML → DOCX 转换"""
+        """HTML → DOCX 转换（使用 htmldocx，无需 Pandoc）
+
+        使用 htmldocx 库将 HTML 转换为 DOCX，失败时回退到 Pandoc。
+        """
+        result_dir = Path("data/output") / task_id
+        result_dir.mkdir(parents=True, exist_ok=True)
+        docx_path = result_dir / "formatted.docx"
+
+        try:
+            from htmldocx import HtmlToDocx
+            from docx import Document
+
+            document = Document()
+            parser = HtmlToDocx()
+            parser.add_html_to_document(html, document)
+            document.save(str(docx_path))
+
+            if not docx_path.exists() or docx_path.stat().st_size == 0:
+                raise RuntimeError("htmldocx HTML→DOCX 转换失败")
+            logger.info("任务 %s: HTML→DOCX (htmldocx) 生成成功: %s", task_id, docx_path)
+            return str(docx_path)
+        except Exception as e:
+            logger.warning("任务 %s: htmldocx 转换失败: %s，回退到 Pandoc", task_id, e)
+            return self._html_to_docx_pandoc(task_id, html)
+
+    def _html_to_docx_pandoc(self, task_id: str, html: str) -> str:
+        """HTML → DOCX 转换（Pandoc 回退方案）"""
         import pypandoc
         import tempfile
 
@@ -1398,7 +1442,7 @@ class TaskManager:
             )
             if not docx_path.exists() or docx_path.stat().st_size == 0:
                 raise RuntimeError("Pandoc HTML→DOCX 转换失败")
-            logger.info("任务 %s: HTML→DOCX 生成成功: %s", task_id, docx_path)
+            logger.info("任务 %s: HTML→DOCX (Pandoc回退) 生成成功: %s", task_id, docx_path)
             return str(docx_path)
         finally:
             try:
@@ -1465,9 +1509,16 @@ class TaskManager:
             db.close()
 
         # 重新生成 DOCX
+        # 优先使用 MinerU 原始 DOCX 作为基础（不使用 Pandoc 转换）
         config = task.config or {}
         extract_dir = config.get("extract_dir", str(result_dir))
-        docx_path = self._convert_to_docx(task_id, updated_markdown, extract_dir)
+        mineru_docx = self.get_mineru_docx_path(task_id)
+        if mineru_docx and Path(mineru_docx).exists():
+            docx_path = mineru_docx
+            logger.info("任务 %s: LLM 内容编辑后使用 MinerU 原始 DOCX 作为基础", task_id)
+        else:
+            # 回退：非 PDF 文件使用 Pandoc MD→DOCX
+            docx_path = self._convert_to_docx(task_id, updated_markdown, extract_dir)
 
         # 应用样式
         style_config = task.style_config_preview or {}

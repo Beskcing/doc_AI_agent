@@ -545,6 +545,13 @@ const TaskDetailPage: React.FC = () => {
       label: <span><EditOutlined /> 内容编辑</span>,
       children: (
         <Card>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="内容编辑说明"
+            description="DOC 富文本编辑加载的是 MinerU 原始 DOCX（保留原始排版），保存时使用 htmldocx 转换无需 Pandoc。Markdown 编辑保存后以 MinerU 原始 DOCX 为基础重新应用样式。"
+          />
           <div style={{ marginBottom: 16 }}>
             <Space>
               <Button
@@ -571,7 +578,7 @@ const TaskDetailPage: React.FC = () => {
                   }
                 }}
               >
-                DOC 富文本编辑
+                DOC 富文本编辑（MinerU原始）
               </Button>
               <Button
                 type="primary"
@@ -583,7 +590,10 @@ const TaskDetailPage: React.FC = () => {
                     const contentType = contentEditMode === 'richtext' ? 'html' : 'markdown'
                     const content = contentEditMode === 'richtext' ? editorHtml : editorMarkdown
                     await updateTaskContent(taskId!, { content, content_type: contentType, regenerate_docx: true })
-                    message.success('内容已保存，DOCX 已重新生成')
+                    message.success(contentEditMode === 'richtext'
+                      ? 'DOC 已保存，样式已重新应用'
+                      : 'Markdown 已保存，样式已重新应用'
+                    )
                     fetchTask()
                     setContentLoaded(false)
                   } catch (err) {
@@ -593,7 +603,7 @@ const TaskDetailPage: React.FC = () => {
                   }
                 }}
               >
-                保存并重新生成 DOCX
+                {contentEditMode === 'richtext' ? '保存 DOC 并重新渲染' : '保存 Markdown 并重新渲染'}
               </Button>
             </Space>
           </div>
