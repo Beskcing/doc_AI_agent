@@ -9,7 +9,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from src.db.models import ChatMessageModel, ChatSessionModel, KbDocumentModel, StyleTemplateModel, SystemConfigModel, TaskModel
+from src.db.models import ChatMessageModel, ChatSessionModel, KbDocumentModel, StyleAdjustmentHistoryModel, StyleTemplateModel, SystemConfigModel, TaskModel
 
 
 class TaskCRUD:
@@ -186,6 +186,34 @@ class StyleTemplateCRUD:
             return True
         return False
 
+    @staticmethod
+    def match_by_standard(db: Session, standard: str) -> StyleTemplateModel | None:
+        """根据标准号自动匹配模板
+
+        策略：
+        1. 从标准号提取关键词（如 GB/T 14454.13 → 14454）
+        2. 在模板名称中搜索匹配的关键词
+        3. 返回最近创建的匹配模板
+        """
+        import re
+
+        # 从标准号提取数字关键词
+        numbers = re.findall(r'\d+', standard)
+        if not numbers:
+            return None
+
+        # 使用最长的数字串作为关键词
+        keyword = max(numbers, key=len)
+        if len(keyword) < 3:
+            return None
+
+        # 在模板名称中搜索
+        templates = db.query(StyleTemplateModel).filter(
+            StyleTemplateModel.name.like(f'%{keyword}%')
+        ).order_by(StyleTemplateModel.created_at.desc()).all()
+
+        return templates[0] if templates else None
+
 
 class SystemConfigCRUD:
     """系统配置 CRUD（单条记录）"""
@@ -300,3 +328,39 @@ class ChatMessageCRUD:
     @staticmethod
     def count_messages(db: Session, session_id: str) -> int:
         return db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
+
+
+class StyleAdjustmentHistoryCRUD:
+    """样式调整历史 CRUD"""
+
+    @staticmethod
+    def create(db: Session, **kwargs) -> StyleAdjustmentHistoryModel:
+        record = StyleAdjustmentHistoryModel(**kwargs)
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+    @staticmethod
+    def list_by_task(db: Session, task_id: str) -> list[StyleAdjustmentHistoryModel]:
+        return db.query(StyleAdjustmentHistoryModel).filter(
+            StyleAdjustmentHistoryModel.task_id == task_id
+        ).order_by(StyleAdjustmentHistoryModel.created_at.desc()).all()
+
+    @staticmethod
+    def list_recent(db: Session, limit: int = 10, standard: str | None = None) -> list[StyleAdjustmentHistoryModel]:
+        """获取最近的样式调整记录（用于 LLM few-shot 示例）"""
+        query = db.query(StyleAdjustmentHistoryModel)
+        if standard:
+            query = query.filter(StyleAdjustmentHistoryModel.standard == standard)
+        return query.order_by(StyleAdjustmentHistoryModel.created_at.desc()).limit(limit).all()
+
+    @staticmethod
+    def delete_by_task(db: Session, task_id: str) -> bool:
+        records = db.query(StyleAdjustmentHistoryModel).filter(
+            StyleAdjustmentHistoryModel.task_id == task_id
+        ).all()
+        for record in records:
+            db.delete(record)
+        db.commit()
+        return True

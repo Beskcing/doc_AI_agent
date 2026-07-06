@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 import uuid
@@ -149,6 +150,153 @@ class TaskManager:
             if target_standard:
                 intent.detected_standard = target_standard
             return intent
+
+    def _auto_match_template(self, standard: str) -> dict | None:
+        """根据标准号自动匹配数据库中的模板（功能2）
+
+        Args:
+            standard: 检测到的标准号（如 GB/T 14454.13-2008）
+
+        Returns:
+            匹配的模板信息 dict，无匹配时返回 None
+        """
+        from src.db.crud import StyleTemplateCRUD
+
+        db = _get_db()
+        try:
+            template = StyleTemplateCRUD.match_by_standard(db, standard)
+            if template:
+                return {
+                    "id": template.id,
+                    "name": template.name,
+                    "description": template.description,
+                }
+            return None
+        except Exception as e:
+            logger.warning("自动匹配模板失败: %s", e)
+            return None
+        finally:
+            db.close()
+
+    def _record_style_adjustment(
+        self,
+        task_id: str,
+        source: str,
+        before_config: dict | None,
+        after_config: dict | None,
+        standard: str | None = None,
+    ) -> None:
+        """记录样式调整历史（功能4：迭代学习）
+
+        Args:
+            task_id: 任务 ID
+            source: 调整来源 (edit_style/upload_corrected/apply_template/chat)
+            before_config: 调整前的样式配置
+            after_config: 调整后的样式配置
+            standard: 关联标准号
+        """
+        from src.db.crud import StyleAdjustmentHistoryCRUD
+
+        # 生成差异摘要
+        diff_summary = self._compute_style_diff(before_config, after_config)
+
+        db = _get_db()
+        try:
+            StyleAdjustmentHistoryCRUD.create(
+                db,
+                task_id=task_id,
+                source=source,
+                before_config=before_config,
+                after_config=after_config,
+                diff_summary=diff_summary,
+                standard=standard,
+            )
+            logger.info("任务 %s: 样式调整已记录 (source=%s, diff=%s)", task_id, source, diff_summary[:100] if diff_summary else "无")
+        except Exception as e:
+            logger.warning("记录样式调整失败: %s", e)
+        finally:
+            db.close()
+
+    @staticmethod
+    def _compute_style_diff(before: dict | None, after: dict | None) -> str:
+        """计算两个样式配置的差异摘要"""
+        if not before or not after:
+            return "新建样式配置" if after else "删除样式配置"
+
+        changes = []
+
+        # 比较正文样式
+        before_body = before.get("body_style", {})
+        after_body = after.get("body_style", {})
+        before_font = before_body.get("font", {})
+        after_font = after_body.get("font", {})
+
+        for key in ["family", "east_asia_family", "size_pt", "bold"]:
+            old_val = before_font.get(key)
+            new_val = after_font.get(key)
+            if old_val != new_val:
+                changes.append(f"正文字体.{key}: {old_val} → {new_val}")
+
+        for key in ["line_spacing", "first_line_indent_chars", "alignment"]:
+            old_val = before_body.get(key)
+            new_val = after_body.get(key)
+            if old_val != new_val:
+                changes.append(f"正文.{key}: {old_val} → {new_val}")
+
+        # 比较页面布局
+        before_pl = before.get("page_layout", {})
+        after_pl = after.get("page_layout", {})
+        for key in ["margin_top_cm", "margin_bottom_cm", "margin_left_cm", "margin_right_cm"]:
+            old_val = before_pl.get(key)
+            new_val = after_pl.get(key)
+            if old_val != new_val:
+                changes.append(f"页面.{key}: {old_val} → {new_val}")
+
+        # 比较表格样式
+        before_ts = before.get("table_style", {})
+        after_ts = after.get("table_style", {})
+        for key in ["border_style", "border_width_pt", "header_bold", "table_alignment"]:
+            old_val = before_ts.get(key)
+            new_val = after_ts.get(key)
+            if old_val != new_val:
+                changes.append(f"表格.{key}: {old_val} → {new_val}")
+
+        return "; ".join(changes) if changes else "无显著差异"
+
+    def _get_few_shot_examples(self, standard: str | None = None, limit: int = 3) -> str:
+        """获取历史样式调整记录作为 few-shot 示例（功能4：迭代学习）
+
+        Args:
+            standard: 标准号，用于筛选相关记录
+            limit: 最多返回的示例数量
+
+        Returns:
+            格式化的 few-shot 示例文本
+        """
+        from src.db.crud import StyleAdjustmentHistoryCRUD
+
+        db = _get_db()
+        try:
+            records = StyleAdjustmentHistoryCRUD.list_recent(db, limit=limit, standard=standard)
+            if not records:
+                return "暂无历史调整记录。"
+
+            examples = []
+            for record in records:
+                if record.before_config and record.after_config and record.diff_summary:
+                    examples.append(
+                        f"- 调整来源: {record.source}\n"
+                        f"  差异: {record.diff_summary}\n"
+                        f"  调整前: {json.dumps(record.before_config, ensure_ascii=False)[:200]}...\n"
+                        f"  调整后: {json.dumps(record.after_config, ensure_ascii=False)[:200]}..."
+                    )
+
+            return "\n".join(examples) if examples else "暂无有效的历史调整记录。"
+        except Exception as e:
+            logger.warning("获取 few-shot 示例失败: %s", e)
+            return "暂无历史调整记录。"
+        finally:
+            db.close()
 
     def _default_style_config(self) -> dict:
         """默认样式配置（LLM 降级用）
@@ -424,6 +572,24 @@ class TaskManager:
             # ──────── 阶段 1.5: 意图分析（LLM + RAG） ────────
             intent = self._analyze_intent(task_id, markdown_content, target_standard)
 
+            # ──────── 阶段 1.6: 自动匹配模板（功能2） ────────
+            if not template_id and intent.detected_standard:
+                matched_template = self._auto_match_template(intent.detected_standard)
+                if matched_template:
+                    template_id = matched_template["id"]
+                    logger.info("任务 %s: 自动匹配模板: %s (%s)", task_id, matched_template["name"], template_id)
+                    # 保存匹配结果到任务配置
+                    db = _get_db()
+                    try:
+                        from sqlalchemy.orm.attributes import flag_modified
+                        task_db = TaskCRUD.get(db, task_id)
+                        if task_db:
+                            new_config = {**(task_db.config or {}), "auto_matched_template": matched_template}
+                            task_db.config = new_config
+                            db.commit()
+                    finally:
+                        db.close()
+
             # ──────── 阶段 2: Markdown 清洗（规则预处理 + LLM 智能审查） ────────
             self.update_status(task_id, "processing", progress=20, current_step="review_content")
             cleaned_markdown = self._clean_markdown(task_id, markdown_content, extract_dir, intent=intent)
@@ -542,6 +708,9 @@ class TaskManager:
             prompt = prompt.replace("{detected_standard}", intent.detected_standard or "GB/T 9704")
             prompt = prompt.replace("{special_elements}", "、".join(special) if special else "无特殊元素")
             prompt = prompt.replace("{rag_context}", rag_context)
+            # 功能4：注入历史调整 few-shot 示例
+            few_shot = self._get_few_shot_examples(standard=intent.detected_standard, limit=3)
+            prompt = prompt.replace("{few_shot_examples}", few_shot)
 
             response = llm.invoke(prompt, self._system_prompt or None)
             json_data = safe_parse_llm_json(response)
@@ -646,7 +815,7 @@ class TaskManager:
         finally:
             db.close()
 
-    def apply_template_to_task(self, task_id: str, style_config: dict) -> str:
+    def apply_template_to_task(self, task_id: str, style_config: dict, record_adjustment: bool = True, source: str = "apply_template") -> str:
         """对已完成任务重新应用样式模板
 
         使用任务的基础 DOCX（MinerU 原始或 Pandoc 生成）重新渲染样式。
@@ -654,6 +823,8 @@ class TaskManager:
         Args:
             task_id: 任务 ID
             style_config: 新的样式配置
+            record_adjustment: 是否记录样式调整历史（功能4）
+            source: 调整来源标记
 
         Returns:
             样式化后的 DOCX 文件路径
@@ -664,6 +835,9 @@ class TaskManager:
             raise ValueError(f"任务不存在: {task_id}")
         if task.status != "completed":
             raise ValueError(f"任务尚未完成，无法应用模板")
+
+        # 记录调整前的样式配置
+        before_config = task.style_config_preview
 
         config = task.config or {}
 
@@ -703,7 +877,67 @@ class TaskManager:
         finally:
             db.close()
 
+        # 功能4：记录样式调整历史
+        if record_adjustment:
+            self._record_style_adjustment(
+                task_id=task_id,
+                source=source,
+                before_config=before_config,
+                after_config=style_config,
+                standard=task.standard,
+            )
+
         return styled_path
+
+    def upload_corrected_docx(self, task_id: str, corrected_docx_path: str) -> dict:
+        """处理用户上传的修正后 DOCX 文件（功能1：用户直接修正DOC）
+
+        流程：
+        1. 使用 DocxStyleExtractor 从修正后的 DOCX 提取样式
+        2. 用提取的样式重新渲染 DOCX
+        3. 记录样式调整历史（功能4）
+
+        Args:
+            task_id: 任务 ID
+            corrected_docx_path: 用户上传的修正后 DOCX 文件路径
+
+        Returns:
+            {"style_config": ..., "result_path": ...}
+        """
+        task = self.get_task(task_id)
+        if not task:
+            raise ValueError(f"任务不存在: {task_id}")
+        if task.status != "completed":
+            raise ValueError(f"任务尚未完成，无法上传修正文件")
+
+        before_config = task.style_config_preview
+
+        # 1. 从修正后的 DOCX 提取样式
+        from src.tools.docx_style_extractor import DocxStyleExtractor
+
+        extractor = DocxStyleExtractor()
+        style_config = extractor.extract(corrected_docx_path)
+
+        logger.info("任务 %s: 从修正后 DOCX 提取样式成功", task_id)
+
+        # 2. 用提取的样式重新渲染
+        styled_path = self.apply_template_to_task(
+            task_id, style_config, record_adjustment=False, source="upload_corrected"
+        )
+
+        # 3. 记录样式调整历史
+        self._record_style_adjustment(
+            task_id=task_id,
+            source="upload_corrected",
+            before_config=before_config,
+            after_config=style_config,
+            standard=task.standard,
+        )
+
+        return {
+            "style_config": style_config,
+            "result_path": styled_path,
+        }
 
     def get_mineru_docx_path(self, task_id: str) -> str | None:
         """获取 MinerU 提供的 DOCX 文件路径"""
@@ -733,6 +967,7 @@ class TaskManager:
             "error_message": task.error_message,
             "file_size_mb": task.file_size_mb,
             "mineru_docx_available": bool(config.get("mineru_docx_path")),
+            "auto_matched_template": config.get("auto_matched_template"),
         }
 
     def to_detail_dict(self, task: TaskModel) -> dict:

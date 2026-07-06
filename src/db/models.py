@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, Integer, String, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.database import Base
@@ -132,3 +132,25 @@ class ChatMessageModel(Base):
 
     def __repr__(self) -> str:
         return f"<ChatMessage(session={self.session_id}, role={self.role})>"
+
+
+class StyleAdjustmentHistoryModel(Base):
+    """样式调整历史表
+
+    记录用户每次调整样式的操作（修正样式/上传修正DOCX/应用模板/对话排版），
+    用于 AI 迭代学习：后续 LLM 样式提取时作为 few-shot 示例参考。
+    """
+
+    __tablename__ = "style_adjustment_history"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    task_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)  # edit_style / upload_corrected / apply_template / chat
+    before_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    after_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    diff_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    standard: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    def __repr__(self) -> str:
+        return f"<StyleAdjustmentHistory(task={self.task_id}, source={self.source})>"

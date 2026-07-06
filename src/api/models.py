@@ -255,6 +255,31 @@ class ApplyTemplateRequest(BaseModel):
 
     template_id: str | None = Field(default=None, description="模板 ID")
     style_config: dict[str, Any] | None = Field(default=None, description="直接传入样式配置")
+    source: str = Field(default="apply_template", description="调整来源: apply_template/edit_style")
+
+
+# ────────── 调整回写 ──────────
+class SaveStyleToTemplateRequest(BaseModel):
+    """保存样式配置到模板请求"""
+
+    template_id: str | None = Field(default=None, description="要更新的模板 ID，为空则新建模板")
+    template_name: str = Field(description="模板名称")
+    style_config: dict[str, Any] = Field(description="样式配置")
+    description: str | None = Field(default=None, description="模板描述")
+
+
+# ────────── 样式调整历史 ──────────
+class StyleAdjustmentInfo(BaseModel):
+    """样式调整记录信息"""
+
+    id: str = Field(description="记录 ID")
+    task_id: str = Field(description="任务 ID")
+    source: str = Field(description="调整来源: edit_style/upload_corrected/apply_template/chat")
+    before_config: dict[str, Any] | None = Field(default=None, description="调整前样式")
+    after_config: dict[str, Any] | None = Field(default=None, description="调整后样式")
+    diff_summary: str | None = Field(default=None, description="差异摘要")
+    standard: str | None = Field(default=None, description="关联标准号")
+    created_at: datetime = Field(description="创建时间")
 
 
 # ────────── 系统配置 ──────────

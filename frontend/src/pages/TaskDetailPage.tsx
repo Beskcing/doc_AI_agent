@@ -20,6 +20,8 @@ import {
   Col,
   Input,
   Typography,
+  Upload,
+  List,
 } from 'antd'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -32,9 +34,12 @@ import {
   FileTextOutlined,
   ThunderboltOutlined,
   EditOutlined,
+  SaveOutlined,
+  HistoryOutlined,
+  UploadOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, listTemplates, applyTemplateToTask } from '../services/api'
+import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory } from '../services/api'
 
 interface TaskDetail {
   id: string
@@ -51,6 +56,7 @@ interface TaskDetail {
   cleaned_markdown_preview: string | null
   style_config_preview: Record<string, unknown> | null
   mineru_docx_available: boolean
+  auto_matched_template?: { id: string; name: string; description?: string | null } | null
 }
 
 const statusColor: Record<string, string> = {
@@ -127,6 +133,26 @@ const TaskDetailPage: React.FC = () => {
   const [editJsonText, setEditJsonText] = useState('')
   const [editJsonError, setEditJsonError] = useState('')
   const [applyingStyle, setApplyingStyle] = useState(false)
+
+  // 功能1：上传修正后 DOCX
+  const [uploadingCorrected, setUploadingCorrected] = useState(false)
+
+  // 功能3：保存到模板
+  const [saveTemplateModalVisible, setSaveTemplateModalVisible] = useState(false)
+  const [saveTemplateName, setSaveTemplateName] = useState('')
+  const [saveTemplateDesc, setSaveTemplateDesc] = useState('')
+  const [saveTemplateId, setSaveTemplateId] = useState<string>('')
+  const [savingTemplate, setSavingTemplate] = useState(false)
+
+  // 功能4：样式调整历史
+  const [styleHistory, setStyleHistory] = useState<Array<{
+    id: string
+    source: string
+    diff_summary: string | null
+    created_at: string
+  }>>([])
+  const [styleHistoryVisible, setStyleHistoryVisible] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -215,7 +241,83 @@ const TaskDetailPage: React.FC = () => {
     setEditStyleConfig({ ...config })
     setEditJsonText(JSON.stringify(config, null, 2))
     setEditJsonError('')
+    setSaveTemplateId('')
+    setSaveTemplateName('')
+    setSaveTemplateDesc('')
     setEditStyleModalVisible(true)
+  }
+
+  // 功能1：上传修正后 DOCX
+  const handleUploadCorrected = async (file: File) => {
+    if (!taskId) return
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (ext !== 'docx') {
+      message.error('请上传 .docx 格式文件')
+      return false
+    }
+    setUploadingCorrected(true)
+    try {
+      await uploadCorrectedDocx(taskId, file)
+      message.success('修正后 DOCX 已上传，样式已提取并重新渲染')
+      fetchTask()
+      return false // 阻止 antd Upload 的自动上传
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '上传失败')
+      return false
+    } finally {
+      setUploadingCorrected(false)
+    }
+  }
+
+  // 功能3：保存样式到模板
+  const handleSaveStyleToTemplate = async () => {
+    if (!taskId || !editStyleConfig) return
+    if (!saveTemplateName.trim()) {
+      message.warning('请输入模板名称')
+      return
+    }
+
+    // 验证 JSON
+    let configToSave = editStyleConfig
+    if (editJsonText.trim()) {
+      try {
+        configToSave = JSON.parse(editJsonText)
+      } catch {
+        message.error('JSON 格式错误，请修正后再保存')
+        return
+      }
+    }
+
+    setSavingTemplate(true)
+    try {
+      const res = await saveStyleToTemplate(taskId, {
+        template_id: saveTemplateId || undefined,
+        template_name: saveTemplateName,
+        style_config: configToSave,
+        description: saveTemplateDesc || undefined,
+      })
+      message.success(saveTemplateId ? '模板已更新' : `新模板已创建: ${res.data.data.template_name}`)
+      setSaveTemplateModalVisible(false)
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setSavingTemplate(false)
+    }
+  }
+
+  // 功能4：加载样式调整历史
+  const handleLoadStyleHistory = async () => {
+    if (!taskId) return
+    setLoadingHistory(true)
+    setStyleHistoryVisible(true)
+    try {
+      const res = await getStyleHistory(taskId)
+      setStyleHistory(res.data.data?.items || [])
+    } catch {
+      // 静默
+    } finally {
+      setLoadingHistory(false)
+    }
   }
 
   // 应用修正后的样式
@@ -236,7 +338,7 @@ const TaskDetailPage: React.FC = () => {
 
     setApplyingStyle(true)
     try {
-      await applyTemplateToTask(taskId, { style_config: configToApply })
+      await applyTemplateToTask(taskId, { style_config: configToApply, source: 'edit_style' })
       message.success('样式修正已应用，DOCX 已重新渲染')
       setEditStyleModalVisible(false)
       fetchTask()
@@ -434,6 +536,23 @@ const TaskDetailPage: React.FC = () => {
               >
                 修正样式
               </Button>
+              {/* 功能1：上传修正后 DOCX */}
+              <Upload
+                accept=".docx"
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  handleUploadCorrected(file as File)
+                  return false
+                }}
+              >
+                <Button
+                  icon={<UploadOutlined />}
+                  loading={uploadingCorrected}
+                >
+                  上传修正后 DOCX
+                </Button>
+              </Upload>
+              {/* 功能3：保存到模板（在修正样式 Modal 内） */}
               <Button
                 icon={<ThunderboltOutlined />}
                 onClick={() => {
@@ -442,6 +561,13 @@ const TaskDetailPage: React.FC = () => {
                 }}
               >
                 应用模板
+              </Button>
+              {/* 功能4：样式调整历史 */}
+              <Button
+                icon={<HistoryOutlined />}
+                onClick={handleLoadStyleHistory}
+              >
+                调整历史
               </Button>
               <Button
                 icon={<EyeOutlined />}
@@ -507,6 +633,15 @@ const TaskDetailPage: React.FC = () => {
               {dayjs(task.completed_at).format('YYYY-MM-DD HH:mm:ss')}
             </Descriptions.Item>
           )}
+          {/* 功能2：自动匹配模板信息 */}
+          {task.auto_matched_template && (
+            <Descriptions.Item label="自动匹配模板" span={3}>
+              <Tag color="blue">{task.auto_matched_template.name}</Tag>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                ID: {task.auto_matched_template.id}
+              </Typography.Text>
+            </Descriptions.Item>
+          )}
           {task.error_message && (
             <Descriptions.Item label="错误信息" span={3}>
               <Tag color="error">{task.error_message}</Tag>
@@ -568,6 +703,31 @@ const TaskDetailPage: React.FC = () => {
         cancelText="取消"
         width={800}
         confirmLoading={applyingStyle}
+        footer={[
+          <Button key="cancel" onClick={() => setEditStyleModalVisible(false)}>取消</Button>,
+          <Button
+            key="saveTemplate"
+            icon={<SaveOutlined />}
+            onClick={() => {
+              setSaveTemplateModalVisible(true)
+              setSaveTemplateName('')
+              setSaveTemplateId('')
+              setSaveTemplateDesc('')
+              // 加载模板列表供选择更新
+              loadTemplates()
+            }}
+          >
+            保存到模板
+          </Button>,
+          <Button
+            key="apply"
+            type="primary"
+            loading={applyingStyle}
+            onClick={handleApplyEditStyle}
+          >
+            应用并重新渲染
+          </Button>,
+        ]}
       >
         <p style={{ marginBottom: 12, color: '#999' }}>
           修改样式配置后点击「应用」，将重新渲染 DOCX 文件。此操作不会重新解析 PDF，仅重新应用排版样式。
@@ -686,6 +846,100 @@ const TaskDetailPage: React.FC = () => {
             </Collapse>
           )
         })()}
+      </Modal>
+
+      {/* 功能3：保存到模板 Modal */}
+      <Modal
+        title="保存样式到模板"
+        open={saveTemplateModalVisible}
+        onOk={handleSaveStyleToTemplate}
+        onCancel={() => setSaveTemplateModalVisible(false)}
+        okText={saveTemplateId ? '更新模板' : '创建新模板'}
+        cancelText="取消"
+        confirmLoading={savingTemplate}
+      >
+        <p style={{ marginBottom: 12, color: '#999' }}>
+          将当前修正后的样式配置保存为模板，后续可在创建任务时直接使用。
+        </p>
+        <div style={{ marginBottom: 12 }}>
+          <Typography.Text type="secondary">选择已有模板更新（可选）</Typography.Text>
+          <Select
+            style={{ width: '100%' }}
+            placeholder="不选则创建新模板"
+            value={saveTemplateId || undefined}
+            onChange={(v) => {
+              setSaveTemplateId(v || '')
+              // 选中模板时自动填充名称
+              const selected = templates.find(t => t.value === v)
+              if (selected && !saveTemplateName) {
+                setSaveTemplateName(selected.label)
+              }
+            }}
+            options={templates}
+            showSearch
+            optionFilterProp="label"
+            allowClear
+          />
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <Typography.Text type="secondary">模板名称</Typography.Text>
+          <Input
+            value={saveTemplateName}
+            placeholder="如: GB/T 14454.13 样式模板"
+            onChange={e => setSaveTemplateName(e.target.value)}
+          />
+        </div>
+        <div>
+          <Typography.Text type="secondary">模板描述（可选）</Typography.Text>
+          <Input.TextArea
+            value={saveTemplateDesc}
+            placeholder="描述模板适用场景"
+            rows={2}
+            onChange={e => setSaveTemplateDesc(e.target.value)}
+          />
+        </div>
+      </Modal>
+
+      {/* 功能4：样式调整历史 Modal */}
+      <Modal
+        title="样式调整历史"
+        open={styleHistoryVisible}
+        onCancel={() => setStyleHistoryVisible(false)}
+        footer={null}
+        width={700}
+      >
+        <Spin spinning={loadingHistory}>
+          {styleHistory.length > 0 ? (
+            <List
+              dataSource={styleHistory}
+              renderItem={(item) => (
+                <List.Item>
+                  <List.Item.Meta
+                    title={
+                      <Space>
+                        <Tag color={
+                          item.source === 'upload_corrected' ? 'blue' :
+                          item.source === 'edit_style' ? 'green' :
+                          item.source === 'apply_template' ? 'orange' : 'default'
+                        }>
+                          {item.source === 'upload_corrected' ? '上传修正DOCX' :
+                           item.source === 'edit_style' ? '修正样式' :
+                           item.source === 'apply_template' ? '应用模板' : item.source}
+                        </Tag>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          {dayjs(item.created_at).format('YYYY-MM-DD HH:mm:ss')}
+                        </Typography.Text>
+                      </Space>
+                    }
+                    description={item.diff_summary || '无差异摘要'}
+                  />
+                </List.Item>
+              )}
+            />
+          ) : (
+            <Empty description="暂无调整历史" />
+          )}
+        </Spin>
       </Modal>
     </div>
   )

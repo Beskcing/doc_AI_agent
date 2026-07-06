@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse
 
@@ -14,6 +14,7 @@ from src.api.models import (
     BatchCreateTaskRequest,
     CreateTaskRequest,
     ResponseModel,
+    SaveStyleToTemplateRequest,
     TaskListResponse,
     TaskStatus,
 )
@@ -393,7 +394,8 @@ async def apply_template_to_task(task_id: str, request: ApplyTemplateRequest) ->
 
         # BUG 修复：在线程池中执行样式渲染，避免阻塞事件循环
         result_path = await run_in_threadpool(
-            task_manager.apply_template_to_task, task_id, style_config
+            task_manager.apply_template_to_task, task_id, style_config,
+            True, request.source,
         )
         return ResponseModel(data={
             "result_path": result_path,
@@ -402,3 +404,115 @@ async def apply_template_to_task(task_id: str, request: ApplyTemplateRequest) ->
     except Exception as e:
         logger.exception("应用模板失败")
         return ResponseModel(code=500, message=f"应用模板失败: {e}")
+
+
+@router.post("/{task_id}/upload-corrected-docx", response_model=ResponseModel)
+async def upload_corrected_docx(task_id: str, file: UploadFile = File(...)) -> ResponseModel:
+    """上传用户手动修正后的 DOCX 文件（功能1：用户直接修正DOC）
+
+    流程：
+    1. 接收用户在 Word 中手动修改后的 DOCX 文件
+    2. 使用 DocxStyleExtractor 从中提取样式
+    3. 用提取的样式重新渲染 DOCX
+    4. 记录样式调整历史（功能4）
+    """
+    ext = Path(file.filename or "").suffix.lower()
+    if ext != ".docx":
+        return ResponseModel(code=400, message=f"仅支持 .docx 格式，收到: {ext}")
+
+    try:
+        # 保存上传的文件
+        import uuid as uuid_mod
+        upload_id = str(uuid_mod.uuid4())
+        corrected_path = UPLOAD_DIR / f"{upload_id}_corrected.docx"
+        contents = await file.read()
+        with open(corrected_path, "wb") as f:
+            f.write(contents)
+
+        # 在线程池中执行样式提取和重新渲染
+        result = await run_in_threadpool(
+            task_manager.upload_corrected_docx, task_id, str(corrected_path)
+        )
+
+        logger.info("任务 %s: 修正后 DOCX 上传处理完成", task_id)
+        return ResponseModel(data=result)
+    except Exception as e:
+        logger.exception("上传修正 DOCX 失败")
+        return ResponseModel(code=500, message=f"处理修正 DOCX 失败: {e}")
+
+
+@router.post("/{task_id}/save-style-to-template", response_model=ResponseModel)
+async def save_style_to_template(task_id: str, request: SaveStyleToTemplateRequest) -> ResponseModel:
+    """将当前任务的样式配置保存为模板（功能3：调整回写）
+
+    用户修正样式后，可将调整后的 style_config 保存为新模板或更新已有模板。
+    """
+    try:
+        from src.db.crud import StyleTemplateCRUD
+        from src.db.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            if request.template_id:
+                # 更新已有模板
+                template = StyleTemplateCRUD.update(
+                    db, request.template_id,
+                    name=request.template_name,
+                    style_config=request.style_config,
+                    description=request.description,
+                )
+                if not template:
+                    return ResponseModel(code=404, message="模板不存在")
+                logger.info("任务 %s: 样式已更新到模板 %s", task_id, template.id)
+            else:
+                # 创建新模板
+                template = StyleTemplateCRUD.create(
+                    db,
+                    name=request.template_name,
+                    style_config=request.style_config,
+                    description=request.description or f"从任务 {task_id} 保存",
+                )
+                logger.info("任务 %s: 样式已保存为新模板 %s", task_id, template.id)
+
+            return ResponseModel(data={
+                "template_id": template.id,
+                "template_name": template.name,
+            })
+        finally:
+            db.close()
+    except Exception as e:
+        logger.exception("保存样式到模板失败")
+        return ResponseModel(code=500, message=f"保存失败: {e}")
+
+
+@router.get("/{task_id}/style-history", response_model=ResponseModel)
+async def get_style_history(task_id: str) -> ResponseModel:
+    """获取任务的样式调整历史（功能4：迭代学习）"""
+    try:
+        from src.db.crud import StyleAdjustmentHistoryCRUD
+        from src.db.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            records = StyleAdjustmentHistoryCRUD.list_by_task(db, task_id)
+            return ResponseModel(data={
+                "items": [
+                    {
+                        "id": r.id,
+                        "task_id": r.task_id,
+                        "source": r.source,
+                        "before_config": r.before_config,
+                        "after_config": r.after_config,
+                        "diff_summary": r.diff_summary,
+                        "standard": r.standard,
+                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                    }
+                    for r in records
+                ],
+                "total": len(records),
+            })
+        finally:
+            db.close()
+    except Exception as e:
+        logger.exception("获取样式调整历史失败")
+        return ResponseModel(code=500, message=f"获取历史失败: {e}")

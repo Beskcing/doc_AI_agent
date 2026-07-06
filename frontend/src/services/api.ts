@@ -91,8 +91,30 @@ export const getMineruDocxDownloadUrl = (taskId: string) => `${API_BASE}/api/tas
 
 export const getMineruDocxPreviewUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/preview/mineru-docx`
 
-export const applyTemplateToTask = (taskId: string, data: { template_id?: string; style_config?: Record<string, unknown> }) =>
+export const applyTemplateToTask = (taskId: string, data: { template_id?: string; style_config?: Record<string, unknown>; source?: string }) =>
   api.post(`/api/tasks/${taskId}/apply-template`, data, { timeout: 120000 })
+
+// 功能1：上传修正后 DOCX
+export const uploadCorrectedDocx = (taskId: string, file: File) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post(`/api/tasks/${taskId}/upload-corrected-docx`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  })
+}
+
+// 功能3：保存样式到模板
+export const saveStyleToTemplate = (taskId: string, data: {
+  template_id?: string
+  template_name: string
+  style_config: Record<string, unknown>
+  description?: string
+}) => api.post(`/api/tasks/${taskId}/save-style-to-template`, data)
+
+// 功能4：获取样式调整历史
+export const getStyleHistory = (taskId: string) =>
+  api.get(`/api/tasks/${taskId}/style-history`)
 
 // ────────── 样式模板 ──────────
 export const uploadTemplate = (file: File) => {
