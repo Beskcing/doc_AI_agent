@@ -160,6 +160,13 @@ class RebuildKbRequest(BaseModel):
     force: bool = Field(default=False, description="强制重建")
 
 
+class KbSearchRequest(BaseModel):
+    """知识库检索请求"""
+
+    query: str = Field(description="检索查询文本")
+    top_k: int = Field(default=5, description="返回结果数量")
+
+
 # ────────── 样式模板 ──────────
 class SaveTemplateRequest(BaseModel):
     """保存样式模板请求"""

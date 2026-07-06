@@ -573,6 +573,7 @@ class TaskManager:
             intent = self._analyze_intent(task_id, markdown_content, target_standard)
 
             # ──────── 阶段 1.6: 自动匹配模板（功能2） ────────
+            template_id = config.get("template_id")  # Bug 修复：template_id 必须在自动匹配前定义
             if not template_id and intent.detected_standard:
                 matched_template = self._auto_match_template(intent.detected_standard)
                 if matched_template:
@@ -611,7 +612,6 @@ class TaskManager:
                 db.close()
 
             # ──────── 阶段 2.5: 样式提取（LLM + RAG 或模板） ────────
-            template_id = config.get("template_id")
             if template_id:
                 # 使用指定模板的样式配置，跳过 LLM 提取
                 style_config = self._get_template_style(template_id)

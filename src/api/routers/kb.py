@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Query, UploadFile
 
-from src.api.models import KbListResponse, ResponseModel
+from src.api.models import KbListResponse, KbSearchRequest, ResponseModel
 from src.db.crud import KbDocumentCRUD
 from src.db.database import SessionLocal
 from src.utils.file_utils import ensure_dir
@@ -191,4 +191,80 @@ async def rebuild_kb_index() -> ResponseModel:
     except Exception as e:
         logger.exception("知识库重建失败")
         return ResponseModel(code=500, message=f"知识库重建失败: {e}")
+
+
+@router.get("/stats", response_model=ResponseModel)
+async def get_kb_stats() -> ResponseModel:
+    """获取知识库统计信息
+
+    返回文档总数、已索引数、待索引数、总 chunk 数等。
+    """
+    try:
+        db = SessionLocal()
+        try:
+            from src.db.models import KbDocumentModel
+
+            total_docs = db.query(KbDocumentModel).count()
+            indexed_docs = db.query(KbDocumentModel).filter(
+                KbDocumentModel.status == "indexed"
+            ).count()
+            pending_docs = db.query(KbDocumentModel).filter(
+                KbDocumentModel.status == "pending"
+            ).count()
+            total_chunks = sum(
+                doc.chunk_count or 0
+                for doc in db.query(KbDocumentModel).all()
+            )
+
+            return ResponseModel(data={
+                "total_docs": total_docs,
+                "indexed_docs": indexed_docs,
+                "pending_docs": pending_docs,
+                "total_chunks": total_chunks,
+            })
+        finally:
+            db.close()
+    except Exception as e:
+        logger.exception("获取知识库统计失败")
+        return ResponseModel(code=500, message=f"获取统计失败: {e}")
+
+
+@router.post("/search", response_model=ResponseModel)
+async def search_kb(request: KbSearchRequest) -> ResponseModel:
+    """知识库检索
+
+    使用混合检索（BM25 + 向量）在知识库中查找相关文档片段。
+    """
+    try:
+        query = request.query
+        top_k = request.top_k
+
+        if not query:
+            return ResponseModel(code=400, message="query 不能为空")
+
+        from src.config import AppConfig
+        from src.rag.knowledge_base_config import KnowledgeBaseManager
+
+        config = AppConfig.load()
+        kb_manager = KnowledgeBaseManager(config.rag)
+        kb_manager.initialize()
+        retriever = kb_manager.get_retriever()
+
+        results = retriever.retrieve(query)
+        items = []
+        for r in results[:top_k]:
+            items.append({
+                "content": r.content,
+                "source": r.source,
+                "section": r.section,
+                "score": getattr(r, "score", None),
+            })
+
+        return ResponseModel(data={
+            "results": items,
+            "total": len(items),
+        })
+    except Exception as e:
+        logger.exception("知识库检索失败")
+        return ResponseModel(code=500, message=f"检索失败: {e}")
 

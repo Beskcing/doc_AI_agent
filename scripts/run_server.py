@@ -37,6 +37,18 @@ def main():
         port=args.port,
         reload=args.reload,
         log_level="info",
+        # Bug 修复：排除 data/knowledge_data/logs 等目录，
+        # 防止 MinerU 输出文件和数据库变化触发频繁重载导致任务中断
+        reload_excludes=[
+            "data/**",
+            "knowledge_data/**",
+            "logs/**",
+            "frontend/**",
+            "tests/**",
+            "__pycache__/**",
+            "*.db",
+            "*.sqlite3",
+        ] if args.reload else None,
     )
 
 

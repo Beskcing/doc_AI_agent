@@ -186,6 +186,11 @@ export const deleteKbDocument = (docId: string) => api.delete(`/api/kb/documents
 
 export const rebuildKbIndex = () => api.post('/api/kb/rebuild')
 
+export const getKbStats = () => api.get('/api/kb/stats')
+
+export const searchKb = (data: { query: string; top_k?: number }) =>
+  api.post('/api/kb/search', data)
+
 // ────────── 配置 ──────────
 export const getConfig = () => api.get('/api/config')
 
