@@ -56,3 +56,4 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-06 | fix | Loop Engineering 全面测试修复3个Bug：Bug#1 取消任务竞态条件(update_status阻止processing覆盖cancelled+_process_task开头检查cancelled+异常处理检查cancelled)、Bug#2 _default_style_config()键名与StyleConfig模型不匹配(body→body_style/heading→heading_styles/table→table_style/字体值改为FontConfig字典)、Bug#3 test_full_manual.py轮询超时太短(120s→360s)；修正test_bugfix_verify.py键名检查(body→body_style)；新增test_chat_template.py和test_cancel_race.py测试脚本 |
 | 2026-07-06 | fix | 修复前端按钮全部失效：React 19与antd v5不兼容导致onClick事件不触发，安装@ant-design/v5-patch-for-react-19兼容补丁(main.tsx引入)；修复UploadPage上传按钮originFileObj为undefined静默返回(f.originFileObj ?? f) |
 | 2026-07-06 | feat | 新增Word文档样式模板提取：从GB/T 14454.13-2008CN.docx提取完整排版模板(封面/前言/1~5级条款/正文/表格/列表/注释/页眉页脚)，基于内容模式+格式特征推断条款层级，输出StyleConfig兼容JSON |
+| 2026-07-06 | feat | 新增模板注册脚本(scripts/register_template.py)：将预提取JSON模板通过API注册到DB，创建任务时可指定template_id跳过LLM样式提取 |
