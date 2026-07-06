@@ -48,10 +48,88 @@
     "space_before_pt": 0,
     "space_after_pt": 0
   },
+  "appendix_title_style": {
+    "description": "附录标题：如 '附录A  （规范性附录）深色香料测定的操作程序'、'附录B  （资料性附录）部分羰基化合物的分子量和反应时间'",
+    "font": {
+      "family": "宋体",
+      "east_asia_family": "宋体",
+      "size_pt": 10.5,
+      "bold": true,
+      "italic": false,
+      "underline": false,
+      "strikethrough": false,
+      "color_hex": "#000000"
+    },
+    "alignment": "justify",
+    "line_spacing": 1.0,
+    "line_spacing_pt": null,
+    "line_spacing_rule": "multiple",
+    "space_before_pt": 0,
+    "space_after_pt": 0,
+    "first_line_indent_chars": 0,
+    "left_indent_cm": 0,
+    "right_indent_cm": 0,
+    "keep_together": true,
+    "keep_with_next": true,
+    "widow_control": true,
+    "note": "附录标题加粗，与普通一级条款(不加粗)不同。格式：附录+字母+两空格+（类型）+标题"
+  },
+  "appendix_clause_style": {
+    "description": "附录内条款：如 'B.1  精油部分见表B.1。'、'B.2  单离及合成香料部分见表B.2。'",
+    "font": {
+      "family": "宋体",
+      "east_asia_family": "宋体",
+      "size_pt": 10.5,
+      "bold": false,
+      "italic": false,
+      "underline": false,
+      "strikethrough": false,
+      "color_hex": "#000000"
+    },
+    "alignment": "justify",
+    "line_spacing": 1.0,
+    "line_spacing_pt": null,
+    "line_spacing_rule": "multiple",
+    "space_before_pt": 0,
+    "space_after_pt": 0,
+    "first_line_indent_chars": 0,
+    "left_indent_cm": 0,
+    "right_indent_cm": 0,
+    "keep_together": false,
+    "keep_with_next": true,
+    "widow_control": true,
+    "note": "附录内条款编号用字母前缀(A.1/B.1/B.2)，不加粗，格式与正文条款相同"
+  },
+  "table_caption_style": {
+    "description": "表格标题：如 '表B.1'、'表B.2'",
+    "font": {
+      "family": "宋体",
+      "east_asia_family": "宋体",
+      "size_pt": 10.5,
+      "bold": false,
+      "italic": false,
+      "underline": false,
+      "strikethrough": false,
+      "color_hex": "#000000"
+    },
+    "alignment": "center",
+    "line_spacing": 1.0,
+    "line_spacing_pt": null,
+    "line_spacing_rule": "multiple",
+    "space_before_pt": 0,
+    "space_after_pt": 0,
+    "first_line_indent_chars": 0,
+    "left_indent_cm": 0,
+    "right_indent_cm": 0,
+    "keep_together": false,
+    "keep_with_next": true,
+    "widow_control": true,
+    "note": "表格标题居中，不加粗，格式：表+字母+序号"
+  },
   "heading_styles": [
     {
       "level": 1,
-      "description": "一级条款：如 '1 范围'、'2 规范性引用文件'、'前言'正文部分、'第一法'、'附录A'",
+      "description": "一级条款：如 '1 范围'、'2 规范性引用文件'、'第一法'、'第二法'、'第三法'",
       "font": {
         "family": "宋体",
         "east_asia_family": "宋体",
@@ -297,7 +375,7 @@
     "widow_control": true
   },
   "footnote_style": null,
-  "caption_style": null,
+  "caption_style": "table_caption_style",
   "header_footer_style": {
     "description": "页眉页脚：仿宋_GB2312 9pt，两端对齐",
     "font": {
@@ -325,5 +403,5 @@
   },
   "rag_sources": [],
   "source_document": "GB/T 14454.13-2008",
-  "extraction_note": "文档所有段落均使用Normal/Body Text样式，条款层级通过内容模式+格式特征推断。封面16pt加粗居中；前言标题16pt居中不加粗；各级条款(1~5级及以上)均为宋体10.5pt不加粗无缩进；正文首行缩进2字符(21pt)；表格单线边框0.5pt表头不加粗"
+  "extraction_note": "文档所有段落均使用Normal/Body Text样式，条款层级通过内容模式+格式特征推断。封面16pt加粗居中；前言标题16pt居中不加粗；各级条款(1~5级及以上)均为宋体10.5pt不加粗无缩进；正文首行缩进2字符(21pt)；表格单线边框0.5pt表头不加粗；附录标题宋体10.5pt加粗(与普通一级条款不同)；附录内条款用字母前缀(A.1/B.1)不加粗；表格标题居中不加粗"
 }

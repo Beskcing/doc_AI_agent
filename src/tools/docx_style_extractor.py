@@ -144,12 +144,15 @@ class DocxStyleExtractor:
             "page_layout": self._extract_page_layout(doc),
             "cover_style": self._extract_cover_style(doc),
             "preface_style": self._extract_preface_style(doc),
+            "appendix_title_style": self._extract_appendix_title_style(doc),
+            "appendix_clause_style": self._extract_appendix_clause_style(doc),
             "heading_styles": self._extract_heading_styles(doc, style_defs),
             "body_style": self._extract_body_style(doc, style_defs),
             "table_style": self._extract_table_style(doc),
+            "table_caption_style": self._extract_table_caption_style(doc),
             "list_style": self._extract_list_style(doc, style_defs),
             "footnote_style": self._extract_footnote_style(doc, style_defs),
-            "caption_style": self._extract_caption_style(doc, style_defs),
+            "caption_style": self._extract_table_caption_style(doc),
             "header_footer_style": self._extract_header_footer_style(doc, style_defs),
             "rag_sources": [],
         }
@@ -406,16 +409,35 @@ class DocxStyleExtractor:
     _SPECIAL_HEADING_PATTERNS = [
         re.compile(r'^前言$'),
         re.compile(r'^引言$'),
-        re.compile(r'^附录\s*[A-Z]'),
         re.compile(r'^第[一二三四五六七八九十]+\s*(法|部分|章|节)'),
         re.compile(r'^参考文献$'),
     ]
+
+    # 附录标题模式（独立于普通标题，因为附录标题加粗而普通一级标题不加粗）
+    _APPENDIX_TITLE_PATTERN = re.compile(r'^附录\s*[A-Z]')
+
+    # 附录内条款模式（A.1 / B.1 / B.2 等）
+    _APPENDIX_CLAUSE_PATTERNS: list[tuple[int, re.Pattern]] = [
+        # 五级: A.1.1.1.1 xxx
+        (5, re.compile(r'^[A-Z]\.\d+\.\d+\.\d+\.\d+\s+\S')),
+        # 四级: A.1.1.1 xxx
+        (4, re.compile(r'^[A-Z]\.\d+\.\d+\.\d+\s+\S')),
+        # 三级: A.1.1 xxx
+        (3, re.compile(r'^[A-Z]\.\d+\.\d+\s+\S')),
+        # 二级: A.1 xxx / B.1 xxx
+        (2, re.compile(r'^[A-Z]\.\d+\s+\S')),
+    ]
+
+    # 表格标题模式
+    _TABLE_CAPTION_PATTERN = re.compile(r'^表\s*[A-Z]?\.?\d+')
 
     def _classify_heading_level_by_content(self, text: str) -> int | None:
         """基于内容模式识别标题级别
 
         用于文档不使用标准 Heading 样式的后备方案。
         识别国标文档常见的条款编号格式。
+        注意：附录标题和附录内条款不在此方法中识别，
+        它们有独立的样式（appendix_title_style / appendix_clause_style）。
 
         Args:
             text: 段落文本（已 strip）
@@ -423,6 +445,16 @@ class DocxStyleExtractor:
         Returns:
             标题级别 (1-5)，非标题返回 None
         """
+        # 附录标题和附录内条款不作为普通标题识别
+        if self._APPENDIX_TITLE_PATTERN.match(text):
+            return None
+        for _, pattern in self._APPENDIX_CLAUSE_PATTERNS:
+            if pattern.match(text):
+                return None
+        # 表格标题不作为普通标题
+        if self._TABLE_CAPTION_PATTERN.match(text):
+            return None
+
         # 检查特殊标题
         for pattern in self._SPECIAL_HEADING_PATTERNS:
             if pattern.match(text):
@@ -520,6 +552,124 @@ class DocxStyleExtractor:
                 }
                 return result
         return None
+
+    # ==================== 附录样式 ====================
+
+    def _extract_appendix_title_style(self, doc: Document) -> dict | None:
+        """提取附录标题样式
+
+        策略：查找以「附录A/B/C...」开头的段落，提取其样式。
+        附录标题通常加粗，与普通一级标题(不加粗)不同。
+        """
+        appendix_paragraphs = []
+        for paragraph in doc.paragraphs:
+            text = paragraph.text.strip()
+            if self._APPENDIX_TITLE_PATTERN.match(text):
+                appendix_paragraphs.append(paragraph)
+
+        if not appendix_paragraphs:
+            return None
+
+        sample = appendix_paragraphs[:min(5, len(appendix_paragraphs))]
+        font_configs = [self._extract_font_from_paragraph(p) for p in sample]
+        alignments = [self._extract_alignment(p) for p in sample]
+        line_spacings = [self._extract_line_spacing_full(p) for p in sample]
+
+        result = {
+            "description": "附录标题样式",
+            "font": self._merge_font_configs(font_configs),
+            "alignment": Counter(alignments).most_common(1)[0][0] if alignments else "justify",
+        }
+        ls, ls_pt, ls_rule = self._most_common_tuple(line_spacings)
+        result["line_spacing"] = ls
+        result["line_spacing_pt"] = ls_pt
+        result["line_spacing_rule"] = ls_rule
+        result.setdefault("space_before_pt", 0)
+        result.setdefault("space_after_pt", 0)
+        result.setdefault("first_line_indent_chars", 0)
+        result.setdefault("left_indent_cm", 0)
+        result.setdefault("right_indent_cm", 0)
+        result.setdefault("keep_together", True)
+        result.setdefault("keep_with_next", True)
+        result.setdefault("widow_control", True)
+        return result
+
+    def _extract_appendix_clause_style(self, doc: Document) -> dict | None:
+        """提取附录内条款样式
+
+        策略：查找以「A.1/B.1...」开头的段落，提取其样式。
+        附录内条款不加粗，格式与正文条款相同。
+        """
+        clause_paragraphs = []
+        for paragraph in doc.paragraphs:
+            text = paragraph.text.strip()
+            for _, pattern in self._APPENDIX_CLAUSE_PATTERNS:
+                if pattern.match(text):
+                    clause_paragraphs.append(paragraph)
+                    break
+
+        if not clause_paragraphs:
+            return None
+
+        sample = clause_paragraphs[:min(10, len(clause_paragraphs))]
+        font_configs = [self._extract_font_from_paragraph(p) for p in sample]
+        alignments = [self._extract_alignment(p) for p in sample]
+        line_spacings = [self._extract_line_spacing_full(p) for p in sample]
+
+        result = {
+            "description": "附录内条款样式",
+            "font": self._merge_font_configs(font_configs),
+            "alignment": Counter(alignments).most_common(1)[0][0] if alignments else "justify",
+        }
+        ls, ls_pt, ls_rule = self._most_common_tuple(line_spacings)
+        result["line_spacing"] = ls
+        result["line_spacing_pt"] = ls_pt
+        result["line_spacing_rule"] = ls_rule
+        result.setdefault("space_before_pt", 0)
+        result.setdefault("space_after_pt", 0)
+        result.setdefault("first_line_indent_chars", 0)
+        result.setdefault("left_indent_cm", 0)
+        result.setdefault("right_indent_cm", 0)
+        result.setdefault("keep_together", False)
+        result.setdefault("keep_with_next", True)
+        result.setdefault("widow_control", True)
+        return result
+
+    def _extract_table_caption_style(self, doc: Document) -> dict | None:
+        """提取表格标题样式
+
+        策略：查找以「表B.1/表1...」开头的段落。
+        """
+        caption_paragraphs = []
+        for paragraph in doc.paragraphs:
+            text = paragraph.text.strip()
+            if self._TABLE_CAPTION_PATTERN.match(text):
+                caption_paragraphs.append(paragraph)
+
+        if not caption_paragraphs:
+            return None
+
+        sample = caption_paragraphs[:min(5, len(caption_paragraphs))]
+        font_configs = [self._extract_font_from_paragraph(p) for p in sample]
+        alignments = [self._extract_alignment(p) for p in sample]
+
+        result = {
+            "description": "表格标题样式",
+            "font": self._merge_font_configs(font_configs),
+            "alignment": Counter(alignments).most_common(1)[0][0] if alignments else "center",
+        }
+        result.setdefault("line_spacing", 1.0)
+        result.setdefault("line_spacing_pt", None)
+        result.setdefault("line_spacing_rule", "multiple")
+        result.setdefault("space_before_pt", 0)
+        result.setdefault("space_after_pt", 0)
+        result.setdefault("first_line_indent_chars", 0)
+        result.setdefault("left_indent_cm", 0)
+        result.setdefault("right_indent_cm", 0)
+        result.setdefault("keep_together", False)
+        result.setdefault("keep_with_next", True)
+        result.setdefault("widow_control", True)
+        return result
 
     # ==================== 标题样式 ====================
 
@@ -668,6 +818,20 @@ class DocxStyleExtractor:
                 continue
             # 排除内容模式识别到的标题段落
             if self._classify_heading_level_by_content(paragraph.text.strip()) is not None:
+                continue
+            # 排除附录标题段落（加粗，不同于普通标题）
+            if self._APPENDIX_TITLE_PATTERN.match(paragraph.text.strip()):
+                continue
+            # 排除附录内条款段落
+            is_appendix_clause = False
+            for _, pattern in self._APPENDIX_CLAUSE_PATTERNS:
+                if pattern.match(paragraph.text.strip()):
+                    is_appendix_clause = True
+                    break
+            if is_appendix_clause:
+                continue
+            # 排除表格标题段落
+            if self._TABLE_CAPTION_PATTERN.match(paragraph.text.strip()):
                 continue
             body_paragraphs.append(paragraph)
 
