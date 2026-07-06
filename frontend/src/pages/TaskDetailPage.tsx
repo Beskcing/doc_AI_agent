@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   Card,
@@ -41,7 +41,8 @@ import {
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory, getTaskContent, getTaskContentHtml, updateTaskContent } from '../services/api'
-import DocEditor from '../components/DocEditor'
+// 懒加载 DocEditor，避免 TinyMCE 影响首屏渲染
+const DocEditor = lazy(() => import('../components/DocEditor'))
 
 interface TaskDetail {
   id: string
@@ -362,7 +363,8 @@ const TaskDetailPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 100 }}>
-        <Spin size="large" tip="加载中..." />
+        <Spin size="large" />
+        <div style={{ marginTop: 8, color: '#999' }}>加载中...</div>
       </div>
     )
   }
@@ -598,10 +600,12 @@ const TaskDetailPage: React.FC = () => {
           {contentLoading ? (
             <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
           ) : contentEditMode === 'richtext' ? (
-            <DocEditor
-              initialHtml={editorHtml}
-              onChange={setEditorHtml}
-            />
+            <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>}>
+              <DocEditor
+                initialHtml={editorHtml}
+                onChange={setEditorHtml}
+              />
+            </Suspense>
           ) : (
             <>
               <Button

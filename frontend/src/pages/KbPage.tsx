@@ -9,6 +9,7 @@ import {
   Card,
 } from 'antd'
 import { UploadOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons'
+import dayjs from 'dayjs'
 import { listKbDocuments, uploadKbDocument, deleteKbDocument, rebuildKbIndex } from '../services/api'
 
 interface KbDocument {
@@ -99,7 +100,9 @@ const KbPage: React.FC = () => {
       ),
     },
     { title: '切片数', dataIndex: 'chunk_count', key: 'chunk_count', width: 100 },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180,
+      render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-',
+    },
     {
       title: '操作',
       key: 'action',

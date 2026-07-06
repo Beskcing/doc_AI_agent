@@ -1,25 +1,13 @@
 /**
  * DOC 富文本编辑器
  * 基于 TinyMCE 的 Word 风格所见即所得编辑器
+ *
+ * TinyMCE 通过 tinymceScriptSrc 从 public 目录加载，
+ * 插件/主题由 TinyMCE 自动从同目录加载，无需 npm import。
  */
 
 import { useRef } from 'react'
 import { Editor } from '@tinymce/tinymce-react'
-
-// 导入 TinyMCE 主题和图标
-import 'tinymce/themes/silver/theme'
-import 'tinymce/icons/default'
-import 'tinymce/models/dom'
-
-// 导入必要的插件
-import 'tinymce/plugins/advlist'
-import 'tinymce/plugins/autolink'
-import 'tinymce/plugins/lists'
-import 'tinymce/plugins/link'
-import 'tinymce/plugins/image'
-import 'tinymce/plugins/table'
-import 'tinymce/plugins/code'
-import 'tinymce/plugins/wordcount'
 
 interface DocEditorProps {
   /** 初始 HTML 内容 */

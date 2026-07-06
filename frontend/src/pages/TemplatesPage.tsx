@@ -510,7 +510,8 @@ const TemplatesPage: React.FC = () => {
       <Card>
         {loading ? (
           <div style={{ textAlign: 'center', padding: 60 }}>
-            <Spin tip="加载中..." />
+            <Spin />
+            <div style={{ marginTop: 8, color: '#999' }}>加载中...</div>
           </div>
         ) : templates.length === 0 ? (
           <Empty description="暂无模板，点击「上传 Word 模板提取」创建">

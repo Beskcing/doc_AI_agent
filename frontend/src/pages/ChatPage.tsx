@@ -1015,8 +1015,9 @@ const ChatPage: React.FC = () => {
             }
           >
             {messagesLoading ? (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Spin tip="加载对话历史..." />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <Spin />
+                <div style={{ marginTop: 8, color: '#999' }}>加载对话历史...</div>
               </div>
             ) : (
               <>
