@@ -12,6 +12,7 @@
   "dependencies": {
     "@ant-design/icons": "^5.5.0",
     "@ant-design/v5-patch-for-react-19": "^1.0.3",
+    "@tinymce/tinymce-react": "^6.3.0",
     "antd": "^5.22.0",
     "axios": "^1.7.0",
     "dayjs": "^1.11.0",
@@ -20,6 +21,7 @@
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.0.0",
     "remark-gfm": "^4.0.1",
+    "tinymce": "^8.7.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

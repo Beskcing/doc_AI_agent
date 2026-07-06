@@ -1171,14 +1171,19 @@ class TaskManager:
         try:
             logger.info("任务 %s: 执行 Pandoc 转换 (extract_dir=%s)", task_id, extract_dir)
 
+            # 使用 reference.docx 改善转换质量
+            extra_args = ["--resource-path", extract_dir, "--standalone"]
+            ref_docx = Path("configs/reference.docx")
+            if ref_docx.exists():
+                extra_args.extend(["--reference-doc", str(ref_docx)])
+                logger.info("任务 %s: 使用 reference.docx 模板", task_id)
+
             pypandoc.convert_file(
                 md_tmp_path,
                 "docx",
                 outputfile=str(docx_path),
                 format="markdown+raw_html+tex_math_dollars",
-                extra_args=[
-                    "--resource-path", extract_dir,
-                ],
+                extra_args=extra_args,
             )
 
             if not docx_path.exists() or docx_path.stat().st_size == 0:
@@ -1237,6 +1242,269 @@ class TaskManager:
 
         logger.info("任务 %s: 样式应用完成 → %s", task_id, styled_path)
         return str(styled_path)
+
+    # ────────── 内容编辑 ──────────
+
+    def update_content(self, task_id: str, content: str, content_type: str = "markdown",
+                       regenerate_docx: bool = True) -> dict:
+        """更新任务的文档内容
+
+        支持 HTML（富文本编辑器）和 Markdown 两种输入格式。
+        保存内容并可选重新生成 DOCX。
+
+        Args:
+            task_id: 任务 ID
+            content: 修改后的内容
+            content_type: 内容类型 (html / markdown)
+            regenerate_docx: 是否重新生成 DOCX
+
+        Returns:
+            {"result_path": ..., "cleaned_markdown_preview": ...}
+        """
+        task = self.get_task(task_id)
+        if not task:
+            raise ValueError(f"任务不存在: {task_id}")
+        if task.status != "completed":
+            raise ValueError(f"任务尚未完成，无法编辑内容")
+
+        result_dir = Path("data/output") / task_id
+        result_dir.mkdir(parents=True, exist_ok=True)
+
+        markdown_content = content
+        docx_path = None
+
+        if content_type == "html":
+            # HTML → Markdown（保存 Markdown 版本）
+            markdown_content = self._html_to_markdown(content, task_id)
+            # HTML → DOCX
+            if regenerate_docx:
+                docx_path = self._html_to_docx(task_id, content)
+        else:
+            # Markdown 直接保存
+            pass
+
+        # 保存 cleaned.md
+        cleaned_md_path = result_dir / "cleaned.md"
+        cleaned_md_path.write_text(markdown_content, encoding="utf-8")
+
+        # 更新 DB
+        db = _get_db()
+        try:
+            task_db = TaskCRUD.get(db, task_id)
+            if task_db:
+                task_db.cleaned_markdown_preview = markdown_content
+                db.commit()
+        finally:
+            db.close()
+
+        # 重新生成 DOCX（Markdown 输入时）
+        if regenerate_docx and content_type == "markdown":
+            # 获取 extract_dir（图片目录）
+            config = task.config or {}
+            extract_dir = config.get("extract_dir", str(result_dir))
+            docx_path = self._convert_to_docx(task_id, markdown_content, extract_dir)
+
+        # 应用样式
+        styled_path = None
+        if regenerate_docx and docx_path and Path(docx_path).exists():
+            style_config = task.style_config_preview or {}
+            styled_path = self._apply_style(task_id, docx_path, style_config)
+
+            # 更新 result_path
+            db = _get_db()
+            try:
+                task_db = TaskCRUD.get(db, task_id)
+                if task_db:
+                    task_db.result_path = styled_path
+                    db.commit()
+            finally:
+                db.close()
+
+        logger.info("任务 %s: 内容更新完成 (type=%s)", task_id, content_type)
+        return {
+            "result_path": styled_path or (task.result_path if not regenerate_docx else None),
+            "cleaned_markdown_preview": markdown_content,
+        }
+
+    def get_content_html(self, task_id: str) -> str | None:
+        """将任务的 cleaned Markdown 转换为 HTML 供富文本编辑器加载
+
+        Args:
+            task_id: 任务 ID
+
+        Returns:
+            HTML 字符串，或 None（任务不存在/无内容）
+        """
+        task = self.get_task(task_id)
+        if not task:
+            return None
+
+        markdown_content = task.cleaned_markdown_preview
+        if not markdown_content:
+            # 尝试从文件读取
+            result_dir = Path("data/output") / task_id
+            md_path = result_dir / "cleaned.md"
+            if md_path.exists():
+                markdown_content = md_path.read_text(encoding="utf-8")
+            else:
+                return None
+
+        try:
+            import pypandoc
+            html = pypandoc.convert_text(
+                markdown_content,
+                "html",
+                format="markdown+raw_html+tex_math_dollars",
+                extra_args=["--standalone"],
+            )
+            return html
+        except Exception as e:
+            logger.warning("任务 %s: Markdown→HTML 转换失败: %s", task_id, e)
+            # 回退：简单的 Markdown→HTML 转换
+            return f"<pre>{markdown_content}</pre>"
+
+    def _html_to_markdown(self, html: str, task_id: str) -> str:
+        """HTML → Markdown 转换"""
+        try:
+            import pypandoc
+            md = pypandoc.convert_text(html, "markdown", format="html")
+            return md
+        except Exception as e:
+            logger.warning("任务 %s: HTML→Markdown 转换失败: %s", task_id, e)
+            return html
+
+    def _html_to_docx(self, task_id: str, html: str) -> str:
+        """HTML → DOCX 转换"""
+        import pypandoc
+        import tempfile
+
+        result_dir = Path("data/output") / task_id
+        result_dir.mkdir(parents=True, exist_ok=True)
+        docx_path = result_dir / "formatted.docx"
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".html", encoding="utf-8", delete=False,
+            dir=str(result_dir),
+        ) as tmp:
+            tmp.write(html)
+            html_tmp_path = tmp.name
+
+        try:
+            pypandoc.convert_file(
+                html_tmp_path,
+                "docx",
+                outputfile=str(docx_path),
+                format="html",
+            )
+            if not docx_path.exists() or docx_path.stat().st_size == 0:
+                raise RuntimeError("Pandoc HTML→DOCX 转换失败")
+            logger.info("任务 %s: HTML→DOCX 生成成功: %s", task_id, docx_path)
+            return str(docx_path)
+        finally:
+            try:
+                Path(html_tmp_path).unlink()
+            except OSError:
+                pass
+
+    def update_content_via_llm(self, task_id: str, message: str, session_id: str | None = None) -> dict:
+        """通过 LLM 对话修改文档内容
+
+        Args:
+            task_id: 任务 ID
+            message: 用户修改指令
+            session_id: 会话 ID
+
+        Returns:
+            {"reply": ..., "updated_markdown": ..., "task_id": ...}
+        """
+        task = self.get_task(task_id)
+        if not task:
+            raise ValueError(f"任务不存在: {task_id}")
+
+        # 获取当前内容
+        markdown_content = task.cleaned_markdown_preview
+        if not markdown_content:
+            result_dir = Path("data/output") / task_id
+            md_path = result_dir / "cleaned.md"
+            if md_path.exists():
+                markdown_content = md_path.read_text(encoding="utf-8")
+            else:
+                raise ValueError("任务无内容可编辑")
+
+        # 加载提示词
+        prompt_path = Path("prompts/content_edit_prompt.md")
+        if prompt_path.exists():
+            prompt_template = prompt_path.read_text(encoding="utf-8")
+        else:
+            prompt_template = (
+                "你是一个国标文档内容编辑专家。用户会用自然语言描述对文档内容的修改需求，"
+                "你需要根据用户的指令修改当前的 Markdown 内容。\n\n"
+                "## 当前文档内容\n\n{current_content}\n\n"
+                "## 用户修改指令\n\n{message}\n\n"
+                "## 修改规则\n\n"
+                "1. 只修改用户明确提到的部分，保持其他内容不变\n"
+                "2. 保持 Markdown 格式和结构不变\n"
+                "3. 输出完整的修改后的 Markdown 内容\n\n"
+                "## 输出格式\n\n"
+                "请输出 JSON 格式：\n"
+                '- `reply`: 对修改内容的简要说明\n'
+                '- `markdown`: 修改后的完整 Markdown 内容\n'
+            )
+
+        # 构建提示词
+        prompt = prompt_template.replace("{current_content}", markdown_content)
+        prompt = prompt.replace("{message}", message)
+
+        # 调用 LLM
+        llm_client = self._get_llm_client()
+        response = llm_client.invoke(prompt)
+
+        # 解析响应
+        result = safe_parse_llm_json(response)
+        reply = result.get("reply", "内容已修改")
+        updated_markdown = result.get("markdown", markdown_content)
+
+        # 保存修改后的内容
+        result_dir = Path("data/output") / task_id
+        result_dir.mkdir(parents=True, exist_ok=True)
+        cleaned_md_path = result_dir / "cleaned.md"
+        cleaned_md_path.write_text(updated_markdown, encoding="utf-8")
+
+        # 更新 DB
+        db = _get_db()
+        try:
+            task_db = TaskCRUD.get(db, task_id)
+            if task_db:
+                task_db.cleaned_markdown_preview = updated_markdown
+                db.commit()
+        finally:
+            db.close()
+
+        # 重新生成 DOCX
+        config = task.config or {}
+        extract_dir = config.get("extract_dir", str(result_dir))
+        docx_path = self._convert_to_docx(task_id, updated_markdown, extract_dir)
+
+        # 应用样式
+        style_config = task.style_config_preview or {}
+        styled_path = self._apply_style(task_id, docx_path, style_config)
+
+        # 更新 result_path
+        db = _get_db()
+        try:
+            task_db = TaskCRUD.get(db, task_id)
+            if task_db:
+                task_db.result_path = styled_path
+                db.commit()
+        finally:
+            db.close()
+
+        logger.info("任务 %s: LLM 内容修改完成", task_id)
+        return {
+            "reply": reply,
+            "updated_markdown": updated_markdown,
+            "task_id": task_id,
+        }
 
 
 # 全局任务管理器实例

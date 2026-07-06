@@ -17,6 +17,7 @@ from src.api.models import (
     SaveStyleToTemplateRequest,
     TaskListResponse,
     TaskStatus,
+    UpdateContentRequest,
 )
 from src.api.services.task_manager import task_manager
 from src.utils.logger import get_logger
@@ -516,3 +517,63 @@ async def get_style_history(task_id: str) -> ResponseModel:
     except Exception as e:
         logger.exception("获取样式调整历史失败")
         return ResponseModel(code=500, message=f"获取历史失败: {e}")
+
+
+# ────────── 内容编辑 ──────────
+
+
+@router.get("/{task_id}/content", response_model=ResponseModel)
+async def get_task_content(task_id: str) -> ResponseModel:
+    """获取任务的文档内容（Markdown 格式）"""
+    try:
+        task = task_manager.get_task(task_id)
+        if not task:
+            return ResponseModel(code=404, message="任务不存在")
+
+        markdown_content = task.cleaned_markdown_preview
+        if not markdown_content:
+            # 尝试从文件读取
+            result_dir = Path("data/output") / task_id
+            md_path = result_dir / "cleaned.md"
+            if md_path.exists():
+                markdown_content = md_path.read_text(encoding="utf-8")
+
+        return ResponseModel(data={
+            "content": markdown_content or "",
+            "content_type": "markdown",
+        })
+    except Exception as e:
+        logger.exception("获取任务内容失败")
+        return ResponseModel(code=500, message=f"获取内容失败: {e}")
+
+
+@router.get("/{task_id}/content/html", response_model=ResponseModel)
+async def get_task_content_html(task_id: str) -> ResponseModel:
+    """获取任务的文档内容（HTML 格式，供富文本编辑器加载）"""
+    try:
+        html = await run_in_threadpool(task_manager.get_content_html, task_id)
+        if html is None:
+            return ResponseModel(code=404, message="任务不存在或无内容")
+        return ResponseModel(data={"html": html})
+    except Exception as e:
+        logger.exception("获取任务 HTML 内容失败")
+        return ResponseModel(code=500, message=f"获取 HTML 内容失败: {e}")
+
+
+@router.put("/{task_id}/content", response_model=ResponseModel)
+async def update_task_content(task_id: str, request: UpdateContentRequest) -> ResponseModel:
+    """更新任务的文档内容（支持 HTML/Markdown）"""
+    try:
+        result = await run_in_threadpool(
+            task_manager.update_content,
+            task_id=task_id,
+            content=request.content,
+            content_type=request.content_type,
+            regenerate_docx=request.regenerate_docx,
+        )
+        return ResponseModel(data=result)
+    except ValueError as e:
+        return ResponseModel(code=400, message=str(e))
+    except Exception as e:
+        logger.exception("更新任务内容失败")
+        return ResponseModel(code=500, message=f"更新内容失败: {e}")

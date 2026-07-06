@@ -15,6 +15,7 @@ from src.api.models import (
     ChatRequest,
     ChatResponse,
     ChatSessionInfo,
+    ContentEditRequest,
     CreateSessionRequest,
     ResponseModel,
 )
@@ -328,3 +329,30 @@ async def chat_style(request: ChatRequest) -> ResponseModel:
         return ResponseModel(code=500, message=f"对话排版失败: {e}")
     finally:
         db.close()
+
+
+# ────────── 对话内容编辑 ──────────
+
+
+@router.post("/content", response_model=ResponseModel)
+async def chat_edit_content(request: ContentEditRequest) -> ResponseModel:
+    """通过 LLM 对话修改文档内容
+
+    用户发送修改指令，LLM 修改文档 Markdown 内容并重新生成 DOCX。
+    """
+    from fastapi.concurrency import run_in_threadpool
+    from src.api.services.task_manager import task_manager
+
+    try:
+        result = await run_in_threadpool(
+            task_manager.update_content_via_llm,
+            task_id=request.task_id,
+            message=request.message,
+            session_id=request.session_id,
+        )
+        return ResponseModel(data=result)
+    except ValueError as e:
+        return ResponseModel(code=400, message=str(e))
+    except Exception as e:
+        logger.exception("对话内容编辑失败")
+        return ResponseModel(code=500, message=f"对话内容编辑失败: {e}")

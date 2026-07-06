@@ -289,6 +289,23 @@ class StyleAdjustmentInfo(BaseModel):
     created_at: datetime = Field(description="创建时间")
 
 
+# ────────── 内容编辑 ──────────
+class UpdateContentRequest(BaseModel):
+    """更新文档内容请求"""
+
+    content: str = Field(description="修改后的内容")
+    content_type: str = Field(default="markdown", description="内容类型: html 或 markdown")
+    regenerate_docx: bool = Field(default=True, description="是否重新生成 DOCX")
+
+
+class ContentEditRequest(BaseModel):
+    """LLM 对话修改文档内容请求"""
+
+    message: str = Field(description="用户修改指令")
+    task_id: str = Field(description="关联的任务 ID")
+    session_id: str | None = Field(default=None, description="会话 ID")
+
+
 # ────────── 系统配置 ──────────
 class SystemConfig(BaseModel):
     """系统配置"""

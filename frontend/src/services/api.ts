@@ -199,3 +199,22 @@ export const updateConfig = (data: Record<string, unknown>) => api.put('/api/con
 export const getSupportedStandards = () => api.get('/api/config/supported-standards')
 
 export const getLlmModels = () => api.get('/api/config/llm-models')
+
+// ────────── 内容编辑 ──────────
+export const getTaskContent = (taskId: string) =>
+  api.get(`/api/tasks/${taskId}/content`)
+
+export const getTaskContentHtml = (taskId: string) =>
+  api.get(`/api/tasks/${taskId}/content/html`)
+
+export const updateTaskContent = (taskId: string, data: {
+  content: string
+  content_type?: 'html' | 'markdown'
+  regenerate_docx?: boolean
+}) => api.put(`/api/tasks/${taskId}/content`, data, { timeout: 120000 })
+
+export const chatEditContent = (data: {
+  message: string
+  task_id: string
+  session_id?: string
+}) => api.post('/api/chat/content', data, { timeout: 120000 })

@@ -36,6 +36,7 @@ import {
   uploadTemplate,
   saveTemplate,
   chatStyle,
+  chatEditContent,
   applyTemplateToTask,
   listTasks,
   listChatSessions,
@@ -116,6 +117,10 @@ const ChatPage: React.FC = () => {
   const [applying, setApplying] = useState(false)
   const [saveForm] = Form.useForm()
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // 对话模式：样式编辑 / 内容编辑
+  const [chatMode, setChatMode] = useState<'style' | 'content'>('style')
+  const [contentEditTaskId, setContentEditTaskId] = useState<string>('')
 
   // 会话管理状态
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -240,21 +245,40 @@ const ChatPage: React.FC = () => {
     setChatLoading(true)
 
     try {
-      const res = await chatStyle({
-        message: userMessage,
-        current_style_config: styleConfig,
-        session_id: currentSessionId || undefined,
-      })
-      const data = res.data.data
-      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
-      if (data.updated_style_config) {
-        setStyleConfig(data.updated_style_config)
-      }
-      // 更新或设置会话 ID
-      if (data.session_id && !currentSessionId) {
-        setCurrentSessionId(data.session_id)
-        // 刷新会话列表
-        loadSessions()
+      if (chatMode === 'content') {
+        // 内容编辑模式
+        if (!contentEditTaskId) {
+          setMessages(prev => [...prev, { role: 'assistant', content: '请先选择要编辑的任务' }])
+          setChatLoading(false)
+          return
+        }
+        const res = await chatEditContent({
+          message: userMessage,
+          task_id: contentEditTaskId,
+          session_id: currentSessionId || undefined,
+        })
+        const data = res.data.data
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `✅ ${data.reply || '内容已修改'}\n\n文档内容已更新并重新生成 DOCX。`,
+        }])
+      } else {
+        // 样式编辑模式（原有逻辑）
+        const res = await chatStyle({
+          message: userMessage,
+          current_style_config: styleConfig,
+          session_id: currentSessionId || undefined,
+        })
+        const data = res.data.data
+        setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
+        if (data.updated_style_config) {
+          setStyleConfig(data.updated_style_config)
+        }
+        // 更新或设置会话 ID
+        if (data.session_id && !currentSessionId) {
+          setCurrentSessionId(data.session_id)
+          loadSessions()
+        }
       }
     } catch (err) {
       setMessages(prev => [...prev, {
@@ -1033,12 +1057,44 @@ const ChatPage: React.FC = () => {
 
                 {/* 输入区 */}
                 <div style={{ flexShrink: 0 }}>
+                  {/* 模式切换 */}
+                  <div style={{ marginBottom: 8 }}>
+                    <Space>
+                      <Button
+                        type={chatMode === 'style' ? 'primary' : 'default'}
+                        size="small"
+                        onClick={() => setChatMode('style')}
+                      >
+                        样式编辑
+                      </Button>
+                      <Button
+                        type={chatMode === 'content' ? 'primary' : 'default'}
+                        size="small"
+                        onClick={() => setChatMode('content')}
+                      >
+                        内容编辑
+                      </Button>
+                      {chatMode === 'content' && (
+                        <Select
+                          style={{ width: 200 }}
+                          placeholder="选择要编辑的任务"
+                          value={contentEditTaskId || undefined}
+                          onChange={setContentEditTaskId}
+                          size="small"
+                          options={tasks.map(t => ({ value: t.id, label: t.filename }))}
+                        />
+                      )}
+                    </Space>
+                  </div>
                   <Space.Compact style={{ width: '100%' }}>
                     <Input
                       value={inputValue}
                       onChange={e => setInputValue(e.target.value)}
                       onPressEnter={handleSendMessage}
-                      placeholder="输入排版修改需求，如：正文改为仿宋16pt，标题居中..."
+                      placeholder={chatMode === 'content'
+                        ? '输入内容修改指令，如：删除第三章、修改标题为...'
+                        : '输入排版修改需求，如：正文改为仿宋16pt，标题居中...'
+                      }
                       disabled={chatLoading}
                     />
                     <Button

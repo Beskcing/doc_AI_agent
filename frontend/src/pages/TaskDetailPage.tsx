@@ -40,7 +40,8 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory } from '../services/api'
+import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory, getTaskContent, getTaskContentHtml, updateTaskContent } from '../services/api'
+import DocEditor from '../components/DocEditor'
 
 interface TaskDetail {
   id: string
@@ -154,6 +155,14 @@ const TaskDetailPage: React.FC = () => {
   }>>([])
   const [styleHistoryVisible, setStyleHistoryVisible] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
+
+  // 内容编辑
+  const [contentEditMode, setContentEditMode] = useState<'markdown' | 'richtext'>('markdown')
+  const [editorHtml, setEditorHtml] = useState('')
+  const [editorMarkdown, setEditorMarkdown] = useState('')
+  const [contentLoading, setContentLoading] = useState(false)
+  const [contentSaving, setContentSaving] = useState(false)
+  const [contentLoaded, setContentLoaded] = useState(false)
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -523,6 +532,104 @@ const TaskDetailPage: React.FC = () => {
                 title="排版后 Word 文档预览"
               />
             </div>
+          )}
+        </Card>
+      ),
+    })
+
+    // 内容编辑 Tab
+    tabItems.push({
+      key: 'content_editor',
+      label: <span><EditOutlined /> 内容编辑</span>,
+      children: (
+        <Card>
+          <div style={{ marginBottom: 16 }}>
+            <Space>
+              <Button
+                type={contentEditMode === 'markdown' ? 'primary' : 'default'}
+                onClick={() => setContentEditMode('markdown')}
+              >
+                Markdown 编辑
+              </Button>
+              <Button
+                type={contentEditMode === 'richtext' ? 'primary' : 'default'}
+                onClick={async () => {
+                  setContentEditMode('richtext')
+                  if (!contentLoaded) {
+                    setContentLoading(true)
+                    try {
+                      const res = await getTaskContentHtml(taskId!)
+                      setEditorHtml(res.data.data?.html || '')
+                      setContentLoaded(true)
+                    } catch (err) {
+                      message.error('加载内容失败')
+                    } finally {
+                      setContentLoading(false)
+                    }
+                  }
+                }}
+              >
+                DOC 富文本编辑
+              </Button>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                loading={contentSaving}
+                onClick={async () => {
+                  setContentSaving(true)
+                  try {
+                    const contentType = contentEditMode === 'richtext' ? 'html' : 'markdown'
+                    const content = contentEditMode === 'richtext' ? editorHtml : editorMarkdown
+                    await updateTaskContent(taskId!, { content, content_type: contentType, regenerate_docx: true })
+                    message.success('内容已保存，DOCX 已重新生成')
+                    fetchTask()
+                    setContentLoaded(false)
+                  } catch (err) {
+                    message.error(err instanceof Error ? err.message : '保存失败')
+                  } finally {
+                    setContentSaving(false)
+                  }
+                }}
+              >
+                保存并重新生成 DOCX
+              </Button>
+            </Space>
+          </div>
+          {contentLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+          ) : contentEditMode === 'richtext' ? (
+            <DocEditor
+              initialHtml={editorHtml}
+              onChange={setEditorHtml}
+            />
+          ) : (
+            <>
+              <Button
+                style={{ marginBottom: 8 }}
+                onClick={async () => {
+                  setContentLoading(true)
+                  try {
+                    const res = await getTaskContent(taskId!)
+                    setEditorMarkdown(res.data.data?.content || '')
+                    setContentLoaded(true)
+                  } catch (err) {
+                    message.error('加载内容失败')
+                  } finally {
+                    setContentLoading(false)
+                  }
+                }}
+                loading={contentLoading && !contentLoaded}
+              >
+                加载 Markdown 内容
+              </Button>
+              <Input.TextArea
+                value={editorMarkdown}
+                onChange={(e) => setEditorMarkdown(e.target.value)}
+                rows={25}
+                style={{ fontFamily: 'monospace', fontSize: 14 }}
+                placeholder="点击「加载 Markdown 内容」按钮加载当前文档内容"
+              />
+            </>
           )}
         </Card>
       ),
