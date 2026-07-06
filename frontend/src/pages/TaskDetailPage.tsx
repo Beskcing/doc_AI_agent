@@ -22,6 +22,7 @@ import {
   Typography,
   Upload,
   List,
+  Alert,
 } from 'antd'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -394,9 +395,19 @@ const TaskDetailPage: React.FC = () => {
             padding: '8px 16px',
           }}>
             {preview.markdown_preview ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                {preview.markdown_preview}
-              </ReactMarkdown>
+              <>
+                {preview.markdown_preview.length > 50000 && (
+                  <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message={`文档较大（${(preview.markdown_preview.length / 1024).toFixed(1)} KB），仅显示前 50,000 字符。完整内容请通过「下载 Word」获取。`}
+                  />
+                )}
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  {preview.markdown_preview.slice(0, 50000)}
+                </ReactMarkdown>
+              </>
             ) : (
               <Empty description="(无预览内容)" />
             )}
