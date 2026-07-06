@@ -78,9 +78,12 @@ const UploadPage: React.FC = () => {
     }
 
     const files = fileList
-      .map((f) => f.originFileObj as File)
+      .map((f) => (f.originFileObj ?? f) as File)
       .filter((f): f is File => !!f)
-    if (files.length === 0) return
+    if (files.length === 0) {
+      message.error('文件对象无效，请重新选择文件')
+      return
+    }
 
     setUploading(true)
     try {
