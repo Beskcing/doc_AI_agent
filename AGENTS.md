@@ -26,6 +26,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 4. **数据库**：SQLAlchemy 2.0 ORM，模型在 `src/db/models.py`，CRUD 在 `src/db/crud.py`，路由层不直接操作 DB。
 5. **文档同步**：行为/工具链变更时更新 AGENTS.md，新增排版规则更新至 RAG 知识库。
 6. **Git 提交（强制）**：每次变更后 `git add -A` + `git commit`（前缀 `feat:/fix:/refactor:/docs:`）+ 更新 AGENTS.md + `git push origin master`。远程：`https://github.com/Beskcing/doc_AI_agent.git`
+7. **变更前讨论（强制）**：每次想要修改或增加功能时，必须先与用户讨论方案、达成一致后，方可开始编码。严禁未经讨论直接动手改代码。
 
 ## MinerU 配置
 通过 `configs/settings.yaml` 的 `mineru.mode` 切换：`online`（默认，线上 API，需 `MINERU_API_TOKEN`）或 `local`（magic-pdf SDK）。模型版本默认 `vlm`。客户端：`src/tools/mineru_api_client.py`，统一入口：`src/tools/mineru_parser.py`。
@@ -67,3 +68,5 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-06 | fix | Loop Engineering 真实PDF全流程测试48项全部通过(100%)：修复Bug#1 LLM对话内容编辑大文档JSON截断(update_content_via_llm将402911字符完整内容注入提示词导致LLM输出超出token限制→大文档>10000字符改用diff模式：仅发送文档首尾摘要+用户指令，LLM输出append/replace/insert操作指令，后端应用diff修改；小文档保留全量模式；JSON解析失败时回退为追加模式)；新增test_loop_v4.py测试脚本覆盖15大功能模块(健康检查/配置/上传/任务生命周期/预览下载/内容编辑/模板CRUD/应用模板/保存样式/对话排版/对话内容/知识库/任务管理/批量任务/清理) |
 | 2026-07-06 | fix | 前端全页面浏览器实测修复4个Bug：Bug#1 TinyMCE npm包import(tinymce/themes/silver/theme等)在模块加载时访问未定义的tinymce全局变量导致页面空白崩溃→移除所有npm import仅用tinymceScriptSrc从public目录加载+DocEditor改用React.lazy懒加载；Bug#2 TinyMCE不存在的undoeditor插件引用→移除(undo/redo为内置功能)；Bug#3 知识库页面创建时间显示原始ISO格式(2026-07-06T14:03:59.669158)→添加dayjs格式化render；Bug#4 antd v5 Spin的tip属性在无children时警告→改为Spin+独立div文本布局(TaskDetailPage/ChatPage/TemplatesPage三处修复) |
 | 2026-07-06 | refactor | 内容编辑流程重构：PDF解析后不再使用Pandoc转换生成DOCX。①get_content_html改为优先加载MinerU原始DOCX→HTML(保留原始排版)，回退cleaned.md→HTML；②新增_html_to_docx方法使用htmldocx库(HTML→DOCX无需Pandoc)，失败回退Pandoc(_html_to_docx_pandoc)；③update_content Markdown模式改为使用MinerU原始DOCX作为基础(不再调用_convert_to_docx/Pandoc)，仅重新应用样式；④update_content_via_llm同样改为MinerU DOCX作为基础；⑤前端按钮文案区分模式(Markdown/DOC)、新增Alert说明编辑流程、ChatPage提示信息更新；⑥新增htmldocx>=0.0.6依赖 |
+| 2026-07-06 | docs | 新增工程规范第7条「变更前讨论（强制）」：每次修改或增加功能前必须先与用户讨论方案，达成一致后方可编码，严禁未经讨论直接动手 |
+| 2026-07-06 | feat | 新增PDF对比预览功能：①后端task_manager.py新增get_original_pdf_path+get_pdf_page_images方法(PyMuPDF将PDF逐页渲染base64 PNG)；②后端tasks.py新增GET /api/tasks/{task_id}/preview/original-pdf端点(返回页面图片列表)；③前端api.ts新增getOriginalPdfPages函数；④TaskDetailPage内容编辑Tab改为左右分栏布局(左侧原始PDF页面图片预览+右侧MinerU原始DOCX编辑区)；⑤支持左右同步滚动(按比例同步+防死循环isSyncingRef)；⑥DocEditor组件新增onEditorInit回调暴露TinyMCE editor实例供同步滚动；⑦Switch开关控制同步/独立滚动；⑧新增pymupdf>=1.24依赖 |

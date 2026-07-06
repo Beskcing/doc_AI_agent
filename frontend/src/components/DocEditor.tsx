@@ -16,13 +16,15 @@ interface DocEditorProps {
   onChange?: (html: string) => void
   /** 是否禁用 */
   disabled?: boolean
+  /** 编辑器初始化完成回调，返回 editor 实例 */
+  onEditorInit?: (editor: any) => void
 }
 
 /**
  * DOC 富文本编辑器组件
  * 提供 Word 风格的所见即所得编辑体验
  */
-export default function DocEditor({ initialHtml, onChange, disabled }: DocEditorProps) {
+export default function DocEditor({ initialHtml, onChange, disabled, onEditorInit }: DocEditorProps) {
   const editorRef = useRef<any>(null)
 
   const handleEditorChange = (content: string) => {
@@ -36,6 +38,7 @@ export default function DocEditor({ initialHtml, onChange, disabled }: DocEditor
       value={initialHtml}
       onInit={(_evt, editor) => {
         editorRef.current = editor
+        onEditorInit?.(editor)
       }}
       onEditorChange={handleEditorChange}
       disabled={disabled}

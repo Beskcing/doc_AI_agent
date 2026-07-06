@@ -347,6 +347,26 @@ async def preview_docx(task_id: str):
     return HTMLResponse(content=html)
 
 
+@router.get("/{task_id}/preview/original-pdf")
+async def preview_original_pdf(task_id: str):
+    """预览原始 PDF 文件（返回页面图片列表）
+
+    使用 PyMuPDF 将 PDF 每页渲染为 base64 PNG 图片，
+    供前端在可滚动容器中展示并实现同步滚动。
+    """
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.status != "completed":
+        raise HTTPException(status_code=400, detail="任务尚未完成")
+
+    pages = await run_in_threadpool(task_manager.get_pdf_page_images, task_id)
+    if not pages:
+        raise HTTPException(status_code=404, detail="原始 PDF 不存在或转换失败")
+
+    return ResponseModel(data={"pages": pages, "total": len(pages)})
+
+
 @router.get("/{task_id}/preview/mineru-docx")
 async def preview_mineru_docx(task_id: str):
     """预览 MinerU 原始 Word 文档（返回 HTML）

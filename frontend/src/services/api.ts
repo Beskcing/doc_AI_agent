@@ -91,6 +91,9 @@ export const getMineruDocxDownloadUrl = (taskId: string) => `${API_BASE}/api/tas
 
 export const getMineruDocxPreviewUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/preview/mineru-docx`
 
+export const getOriginalPdfPages = (taskId: string) =>
+  api.get(`/api/tasks/${taskId}/preview/original-pdf`, { timeout: 120000 })
+
 export const applyTemplateToTask = (taskId: string, data: { template_id?: string; style_config?: Record<string, unknown>; source?: string }) =>
   api.post(`/api/tasks/${taskId}/apply-template`, data, { timeout: 120000 })
 

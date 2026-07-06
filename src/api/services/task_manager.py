@@ -950,6 +950,71 @@ class TaskManager:
             return docx_path
         return None
 
+    def get_original_pdf_path(self, task_id: str) -> str | None:
+        """获取用户上传的原始 PDF 文件路径
+
+        从任务配置的 file_path 中获取原始上传文件路径，
+        仅当文件存在且为 PDF 格式时返回。
+        """
+        task = self.get_task(task_id)
+        if not task:
+            return None
+        config = task.config or {}
+        file_path = config.get("file_path")
+        if file_path and Path(file_path).exists():
+            if Path(file_path).suffix.lower() == ".pdf":
+                return file_path
+        return None
+
+    def get_pdf_page_images(
+        self, task_id: str, dpi: int = 150, max_pages: int = 0
+    ) -> list[dict] | None:
+        """将原始 PDF 每页渲染为 base64 PNG 图片
+
+        使用 PyMuPDF (fitz) 将 PDF 逐页转为图片，供前端在可滚动容器中展示。
+        前端可监听滚动事件实现与编辑区域的同步滚动。
+
+        Args:
+            task_id: 任务 ID
+            dpi: 渲染分辨率，默认 150（平衡清晰度和性能）
+            max_pages: 最大页数，0 表示不限制
+
+        Returns:
+            [{"page": 1, "image": "data:image/png;base64,..."}, ...] 或 None
+        """
+        pdf_path = self.get_original_pdf_path(task_id)
+        if not pdf_path:
+            return None
+
+        try:
+            import fitz  # PyMuPDF
+            import base64
+
+            doc = fitz.open(pdf_path)
+            pages = []
+            page_count = len(doc) if max_pages == 0 else min(len(doc), max_pages)
+            zoom = dpi / 72  # 72 是 PDF 默认 DPI
+            mat = fitz.Matrix(zoom, zoom)
+
+            for i in range(page_count):
+                page = doc[i]
+                pix = page.get_pixmap(matrix=mat)
+                img_bytes = pix.tobytes("png")
+                img_b64 = base64.b64encode(img_bytes).decode("ascii")
+                pages.append({
+                    "page": i + 1,
+                    "image": f"data:image/png;base64,{img_b64}",
+                    "width": pix.width,
+                    "height": pix.height,
+                })
+
+            doc.close()
+            logger.info("任务 %s: PDF 转图片成功，共 %d 页", task_id, len(pages))
+            return pages
+        except Exception as e:
+            logger.error("任务 %s: PDF 转图片失败: %s", task_id, e)
+            return None
+
     def to_info_dict(self, task: TaskModel) -> dict:
         """转换为 API 响应字典"""
         config = task.config or {}

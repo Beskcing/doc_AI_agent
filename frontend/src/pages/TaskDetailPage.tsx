@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react'
+import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   Card,
@@ -23,6 +23,7 @@ import {
   Upload,
   List,
   Alert,
+  Switch,
 } from 'antd'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -40,7 +41,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory, getTaskContent, getTaskContentHtml, updateTaskContent } from '../services/api'
+import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, getOriginalPdfPages, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory, getTaskContent, getTaskContentHtml, updateTaskContent } from '../services/api'
 // 懒加载 DocEditor，避免 TinyMCE 影响首屏渲染
 const DocEditor = lazy(() => import('../components/DocEditor'))
 
@@ -164,6 +165,18 @@ const TaskDetailPage: React.FC = () => {
   const [contentLoading, setContentLoading] = useState(false)
   const [contentSaving, setContentSaving] = useState(false)
   const [contentLoaded, setContentLoaded] = useState(false)
+
+  // PDF 对比预览
+  const [pdfPages, setPdfPages] = useState<Array<{ page: number; image: string; width: number; height: number }>>([])
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const [pdfLoaded, setPdfLoaded] = useState(false)
+  const [syncScroll, setSyncScroll] = useState(true)
+
+  // 同步滚动 refs
+  const pdfScrollRef = useRef<HTMLDivElement>(null)
+  const markdownScrollRef = useRef<any>(null)
+  const tinyMceEditorRef = useRef<any>(null)
+  const isSyncingRef = useRef(false)
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -360,6 +373,94 @@ const TaskDetailPage: React.FC = () => {
     }
   }
 
+  // 加载原始 PDF 页面图片
+  const handleLoadPdfPages = async () => {
+    if (!taskId) return
+    setPdfLoading(true)
+    try {
+      const res = await getOriginalPdfPages(taskId)
+      const pages = res.data.data?.pages || []
+      if (pages.length === 0) {
+        message.warning('该任务无原始 PDF 文件（可能上传的是 Markdown/TXT）')
+        return
+      }
+      setPdfPages(pages)
+      setPdfLoaded(true)
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '加载 PDF 预览失败')
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+
+  // 同步滚动：左侧 PDF 滚动 → 同步右侧编辑区
+  const handlePdfScroll = useCallback(() => {
+    if (!syncScroll || isSyncingRef.current) return
+    const pdfEl = pdfScrollRef.current
+    if (!pdfEl) return
+    const maxScroll = pdfEl.scrollHeight - pdfEl.clientHeight
+    if (maxScroll <= 0) return
+    const ratio = pdfEl.scrollTop / maxScroll
+
+    isSyncingRef.current = true
+
+    // 同步到 Markdown TextArea
+    if (contentEditMode === 'markdown' && markdownScrollRef.current) {
+      const mdEl = markdownScrollRef.current?.resizableTextArea?.textArea || markdownScrollRef.current
+      const mdMax = mdEl.scrollHeight - mdEl.clientHeight
+      if (mdMax > 0) mdEl.scrollTop = ratio * mdMax
+    }
+
+    // 同步到 TinyMCE iframe
+    if (contentEditMode === 'richtext' && tinyMceEditorRef.current) {
+      const editor = tinyMceEditorRef.current
+      const iframe = editor.iframeElement
+      if (iframe && iframe.contentWindow) {
+        const win = iframe.contentWindow
+        const doc = win.document?.documentElement
+        if (doc) {
+          const max = doc.scrollHeight - win.innerHeight
+          if (max > 0) win.scrollTo(0, ratio * max)
+        }
+      }
+    }
+
+    requestAnimationFrame(() => { isSyncingRef.current = false })
+  }, [syncScroll, contentEditMode])
+
+  // 同步滚动：右侧编辑区滚动 → 同步左侧 PDF
+  const handleEditorScroll = useCallback(() => {
+    if (!syncScroll || isSyncingRef.current) return
+    const pdfEl = pdfScrollRef.current
+    if (!pdfEl) return
+
+    let ratio = 0
+    if (contentEditMode === 'markdown' && markdownScrollRef.current) {
+      const mdEl = markdownScrollRef.current?.resizableTextArea?.textArea || markdownScrollRef.current
+      const mdMax = mdEl.scrollHeight - mdEl.clientHeight
+      if (mdMax <= 0) return
+      ratio = mdEl.scrollTop / mdMax
+    } else if (contentEditMode === 'richtext' && tinyMceEditorRef.current) {
+      const editor = tinyMceEditorRef.current
+      const iframe = editor.iframeElement
+      if (iframe && iframe.contentWindow) {
+        const win = iframe.contentWindow
+        const doc = win.document?.documentElement
+        if (!doc) return
+        const max = doc.scrollHeight - win.innerHeight
+        if (max <= 0) return
+        ratio = win.scrollY / max
+      }
+    } else {
+      return
+    }
+
+    isSyncingRef.current = true
+    const maxScroll = pdfEl.scrollHeight - pdfEl.clientHeight
+    if (maxScroll > 0) pdfEl.scrollTop = ratio * maxScroll
+    requestAnimationFrame(() => { isSyncingRef.current = false })
+  }, [syncScroll, contentEditMode])
+
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 100 }}>
@@ -539,7 +640,7 @@ const TaskDetailPage: React.FC = () => {
       ),
     })
 
-    // 内容编辑 Tab
+    // 内容编辑 Tab（左右分栏：左侧 PDF 对比预览 + 右侧编辑区）
     tabItems.push({
       key: 'content_editor',
       label: <span><EditOutlined /> 内容编辑</span>,
@@ -548,103 +649,191 @@ const TaskDetailPage: React.FC = () => {
           <Alert
             type="info"
             showIcon
-            style={{ marginBottom: 16 }}
-            message="内容编辑说明"
-            description="DOC 富文本编辑加载的是 MinerU 原始 DOCX（保留原始排版），保存时使用 htmldocx 转换无需 Pandoc。Markdown 编辑保存后以 MinerU 原始 DOCX 为基础重新应用样式。"
+            style={{ marginBottom: 12 }}
+            message="内容编辑 + PDF 对比预览"
+            description="左侧显示原始 PDF 页面，右侧为 MinerU 原始 DOCX 编辑区。对照 PDF 内容检查解析结果是否有误，直接在右侧编辑修正。支持左右同步滚动。"
           />
-          <div style={{ marginBottom: 16 }}>
-            <Space>
-              <Button
-                type={contentEditMode === 'markdown' ? 'primary' : 'default'}
-                onClick={() => setContentEditMode('markdown')}
-              >
-                Markdown 编辑
-              </Button>
-              <Button
-                type={contentEditMode === 'richtext' ? 'primary' : 'default'}
-                onClick={async () => {
-                  setContentEditMode('richtext')
-                  if (!contentLoaded) {
-                    setContentLoading(true)
-                    try {
-                      const res = await getTaskContentHtml(taskId!)
-                      setEditorHtml(res.data.data?.html || '')
-                      setContentLoaded(true)
-                    } catch (err) {
-                      message.error('加载内容失败')
-                    } finally {
-                      setContentLoading(false)
-                    }
-                  }
-                }}
-              >
-                DOC 富文本编辑（MinerU原始）
-              </Button>
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                loading={contentSaving}
-                onClick={async () => {
-                  setContentSaving(true)
-                  try {
-                    const contentType = contentEditMode === 'richtext' ? 'html' : 'markdown'
-                    const content = contentEditMode === 'richtext' ? editorHtml : editorMarkdown
-                    await updateTaskContent(taskId!, { content, content_type: contentType, regenerate_docx: true })
-                    message.success(contentEditMode === 'richtext'
-                      ? 'DOC 已保存，样式已重新应用'
-                      : 'Markdown 已保存，样式已重新应用'
-                    )
-                    fetchTask()
-                    setContentLoaded(false)
-                  } catch (err) {
-                    message.error(err instanceof Error ? err.message : '保存失败')
-                  } finally {
-                    setContentSaving(false)
-                  }
-                }}
-              >
-                {contentEditMode === 'richtext' ? '保存 DOC 并重新渲染' : '保存 Markdown 并重新渲染'}
-              </Button>
-            </Space>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            {/* 左侧：PDF 预览 */}
+            <div style={{ width: '40%', minWidth: 300, flexShrink: 0 }}>
+              <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography.Text strong>原始 PDF 预览</Typography.Text>
+                <Space size={8}>
+                  <Switch
+                    checked={syncScroll}
+                    onChange={setSyncScroll}
+                    checkedChildren="同步滚动"
+                    unCheckedChildren="独立滚动"
+                    size="small"
+                  />
+                  <Button
+                    size="small"
+                    icon={<EyeOutlined />}
+                    onClick={handleLoadPdfPages}
+                    loading={pdfLoading}
+                    type="primary"
+                  >
+                    {pdfLoaded ? '刷新' : '加载 PDF'}
+                  </Button>
+                </Space>
+              </div>
+              {pdfLoaded && pdfPages.length > 0 ? (
+                <div
+                  ref={pdfScrollRef}
+                  onScroll={handlePdfScroll}
+                  style={{
+                    height: 'calc(100vh - 220px)',
+                    minHeight: 500,
+                    overflowY: 'auto',
+                    border: '1px solid #d9d9d9',
+                    borderRadius: 8,
+                    padding: 8,
+                    background: '#f5f5f5',
+                  }}
+                >
+                  {pdfPages.map((p) => (
+                    <div key={p.page} style={{ marginBottom: 8, textAlign: 'center' }}>
+                      <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>第 {p.page} 页</div>
+                      <img
+                        src={p.image}
+                        alt={`PDF 第 ${p.page} 页`}
+                        style={{ width: '100%', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{
+                  height: 'calc(100vh - 220px)',
+                  minHeight: 500,
+                  border: '1px dashed #d9d9d9',
+                  borderRadius: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#999',
+                }}>
+                  {pdfLoading ? <Spin /> : '点击「加载 PDF」按钮预览原始文件'}
+                </div>
+              )}
+            </div>
+
+            {/* 右侧：编辑区 */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ marginBottom: 8 }}>
+                <Space wrap>
+                  <Button
+                    size="small"
+                    type={contentEditMode === 'markdown' ? 'primary' : 'default'}
+                    onClick={() => setContentEditMode('markdown')}
+                  >
+                    Markdown 编辑
+                  </Button>
+                  <Button
+                    size="small"
+                    type={contentEditMode === 'richtext' ? 'primary' : 'default'}
+                    onClick={async () => {
+                      setContentEditMode('richtext')
+                      if (!contentLoaded) {
+                        setContentLoading(true)
+                        try {
+                          const res = await getTaskContentHtml(taskId!)
+                          setEditorHtml(res.data.data?.html || '')
+                          setContentLoaded(true)
+                        } catch (err) {
+                          message.error('加载内容失败')
+                        } finally {
+                          setContentLoading(false)
+                        }
+                      }
+                    }}
+                  >
+                    DOC 富文本编辑（MinerU原始）
+                  </Button>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<SaveOutlined />}
+                    loading={contentSaving}
+                    onClick={async () => {
+                      setContentSaving(true)
+                      try {
+                        const contentType = contentEditMode === 'richtext' ? 'html' : 'markdown'
+                        const content = contentEditMode === 'richtext' ? editorHtml : editorMarkdown
+                        await updateTaskContent(taskId!, { content, content_type: contentType, regenerate_docx: true })
+                        message.success(contentEditMode === 'richtext'
+                          ? 'DOC 已保存，样式已重新应用'
+                          : 'Markdown 已保存，样式已重新应用'
+                        )
+                        fetchTask()
+                        setContentLoaded(false)
+                      } catch (err) {
+                        message.error(err instanceof Error ? err.message : '保存失败')
+                      } finally {
+                        setContentSaving(false)
+                      }
+                    }}
+                  >
+                    {contentEditMode === 'richtext' ? '保存 DOC 并重新渲染' : '保存 Markdown 并重新渲染'}
+                  </Button>
+                </Space>
+              </div>
+              {contentLoading ? (
+                <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+              ) : contentEditMode === 'richtext' ? (
+                <div
+                  onScroll={handleEditorScroll}
+                  style={{ height: 'calc(100vh - 220px)', minHeight: 500, overflow: 'hidden' }}
+                >
+                  <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>}>
+                    <DocEditor
+                      initialHtml={editorHtml}
+                      onChange={setEditorHtml}
+                      onEditorInit={(editor) => {
+                        tinyMceEditorRef.current = editor
+                        // 监听 TinyMCE iframe 内部滚动
+                        const iframe = editor.iframeElement
+                        if (iframe && iframe.contentWindow) {
+                          iframe.contentWindow.addEventListener('scroll', handleEditorScroll)
+                        }
+                      }}
+                    />
+                  </Suspense>
+                </div>
+              ) : (
+                <div style={{ height: 'calc(100vh - 220px)', minHeight: 500 }}>
+                  <Button
+                    style={{ marginBottom: 8 }}
+                    size="small"
+                    onClick={async () => {
+                      setContentLoading(true)
+                      try {
+                        const res = await getTaskContent(taskId!)
+                        setEditorMarkdown(res.data.data?.content || '')
+                        setContentLoaded(true)
+                      } catch (err) {
+                        message.error('加载内容失败')
+                      } finally {
+                        setContentLoading(false)
+                      }
+                    }}
+                    loading={contentLoading && !contentLoaded}
+                  >
+                    加载 Markdown 内容
+                  </Button>
+                  <Input.TextArea
+                    ref={markdownScrollRef as any}
+                    value={editorMarkdown}
+                    onChange={(e) => setEditorMarkdown(e.target.value)}
+                    onScroll={handleEditorScroll}
+                    rows={25}
+                    style={{ fontFamily: 'monospace', fontSize: 14, height: 'calc(100vh - 280px)' }}
+                    placeholder="点击「加载 Markdown 内容」按钮加载当前文档内容"
+                  />
+                </div>
+              )}
+            </div>
           </div>
-          {contentLoading ? (
-            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-          ) : contentEditMode === 'richtext' ? (
-            <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>}>
-              <DocEditor
-                initialHtml={editorHtml}
-                onChange={setEditorHtml}
-              />
-            </Suspense>
-          ) : (
-            <>
-              <Button
-                style={{ marginBottom: 8 }}
-                onClick={async () => {
-                  setContentLoading(true)
-                  try {
-                    const res = await getTaskContent(taskId!)
-                    setEditorMarkdown(res.data.data?.content || '')
-                    setContentLoaded(true)
-                  } catch (err) {
-                    message.error('加载内容失败')
-                  } finally {
-                    setContentLoading(false)
-                  }
-                }}
-                loading={contentLoading && !contentLoaded}
-              >
-                加载 Markdown 内容
-              </Button>
-              <Input.TextArea
-                value={editorMarkdown}
-                onChange={(e) => setEditorMarkdown(e.target.value)}
-                rows={25}
-                style={{ fontFamily: 'monospace', fontSize: 14 }}
-                placeholder="点击「加载 Markdown 内容」按钮加载当前文档内容"
-              />
-            </>
-          )}
         </Card>
       ),
     })
