@@ -14,6 +14,12 @@ import {
   Empty,
   Modal,
   Select,
+  InputNumber,
+  Collapse,
+  Row,
+  Col,
+  Input,
+  Typography,
 } from 'antd'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -25,6 +31,7 @@ import {
   FileWordOutlined,
   FileTextOutlined,
   ThunderboltOutlined,
+  EditOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, listTemplates, applyTemplateToTask } from '../services/api'
@@ -114,6 +121,13 @@ const TaskDetailPage: React.FC = () => {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
   const [applyingTemplate, setApplyingTemplate] = useState(false)
 
+  // 修正样式
+  const [editStyleModalVisible, setEditStyleModalVisible] = useState(false)
+  const [editStyleConfig, setEditStyleConfig] = useState<Record<string, unknown> | null>(null)
+  const [editJsonText, setEditJsonText] = useState('')
+  const [editJsonError, setEditJsonError] = useState('')
+  const [applyingStyle, setApplyingStyle] = useState(false)
+
   const loadTemplates = useCallback(async () => {
     try {
       const res = await listTemplates()
@@ -181,6 +195,55 @@ const TaskDetailPage: React.FC = () => {
       message.error(error.message || '重试失败')
     } finally {
       setRetrying(false)
+    }
+  }
+
+  // 打开修正样式 Modal：优先使用预览中的 style_config，没有则加载预览
+  const handleOpenEditStyle = async () => {
+    let config = preview?.style_config || task?.style_config_preview
+    if (!config) {
+      // 先加载预览获取 style_config
+      if (!preview) {
+        await fetchPreview()
+      }
+      config = preview?.style_config || task?.style_config_preview
+    }
+    if (!config) {
+      message.warning('无法获取当前样式配置，请先点击「预览结果」加载')
+      return
+    }
+    setEditStyleConfig({ ...config })
+    setEditJsonText(JSON.stringify(config, null, 2))
+    setEditJsonError('')
+    setEditStyleModalVisible(true)
+  }
+
+  // 应用修正后的样式
+  const handleApplyEditStyle = async () => {
+    if (!taskId || !editStyleConfig) return
+
+    // 验证 JSON
+    let configToApply = editStyleConfig
+    if (editJsonText.trim()) {
+      try {
+        configToApply = JSON.parse(editJsonText)
+        setEditJsonError('')
+      } catch {
+        setEditJsonError('JSON 格式错误，请检查后再保存')
+        return
+      }
+    }
+
+    setApplyingStyle(true)
+    try {
+      await applyTemplateToTask(taskId, { style_config: configToApply })
+      message.success('样式修正已应用，DOCX 已重新渲染')
+      setEditStyleModalVisible(false)
+      fetchTask()
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '应用失败')
+    } finally {
+      setApplyingStyle(false)
     }
   }
 
@@ -366,6 +429,12 @@ const TaskDetailPage: React.FC = () => {
           {task.status === 'completed' && (
             <>
               <Button
+                icon={<EditOutlined />}
+                onClick={handleOpenEditStyle}
+              >
+                修正样式
+              </Button>
+              <Button
                 icon={<ThunderboltOutlined />}
                 onClick={() => {
                   setTemplateModalVisible(true)
@@ -487,6 +556,136 @@ const TaskDetailPage: React.FC = () => {
           showSearch
           optionFilterProp="label"
         />
+      </Modal>
+
+      {/* 修正样式 Modal */}
+      <Modal
+        title="修正样式配置"
+        open={editStyleModalVisible}
+        onOk={handleApplyEditStyle}
+        onCancel={() => setEditStyleModalVisible(false)}
+        okText="应用并重新渲染"
+        cancelText="取消"
+        width={800}
+        confirmLoading={applyingStyle}
+      >
+        <p style={{ marginBottom: 12, color: '#999' }}>
+          修改样式配置后点击「应用」，将重新渲染 DOCX 文件。此操作不会重新解析 PDF，仅重新应用排版样式。
+        </p>
+        {editStyleConfig && (() => {
+          const pl = editStyleConfig.page_layout as Record<string, unknown> | undefined
+          const bs = editStyleConfig.body_style as Record<string, unknown> | undefined
+          const bodyFont = bs?.font as Record<string, unknown> | undefined
+          const ts = editStyleConfig.table_style as Record<string, unknown> | undefined
+
+          const updateField = (section: string, field: string, value: unknown) => {
+            const sectionData = editStyleConfig[section] as Record<string, unknown> | undefined
+            const newConfig = { ...editStyleConfig, [section]: { ...sectionData, [field]: value } }
+            setEditStyleConfig(newConfig)
+            setEditJsonText(JSON.stringify(newConfig, null, 2))
+          }
+          const updateFontField = (section: string, field: string, value: unknown) => {
+            const sectionData = editStyleConfig[section] as Record<string, unknown> | undefined
+            const fontData = sectionData?.font as Record<string, unknown> | undefined
+            const newConfig = { ...editStyleConfig, [section]: { ...sectionData, font: { ...fontData, [field]: value } } }
+            setEditStyleConfig(newConfig)
+            setEditJsonText(JSON.stringify(newConfig, null, 2))
+          }
+
+          return (
+            <Collapse defaultActiveKey={['page', 'body', 'table', 'json']} size="small">
+              <Collapse.Panel header="页面布局" key="page">
+                <Row gutter={8}>
+                  <Col span={8}>
+                    <Typography.Text type="secondary">上边距(cm)</Typography.Text>
+                    <InputNumber value={pl?.margin_top_cm as number} style={{ width: '100%' }} size="small" step={0.1} onChange={v => updateField('page_layout', 'margin_top_cm', v)} />
+                  </Col>
+                  <Col span={8}>
+                    <Typography.Text type="secondary">下边距(cm)</Typography.Text>
+                    <InputNumber value={pl?.margin_bottom_cm as number} style={{ width: '100%' }} size="small" step={0.1} onChange={v => updateField('page_layout', 'margin_bottom_cm', v)} />
+                  </Col>
+                  <Col span={8}>
+                    <Typography.Text type="secondary">左边距(cm)</Typography.Text>
+                    <InputNumber value={pl?.margin_left_cm as number} style={{ width: '100%' }} size="small" step={0.1} onChange={v => updateField('page_layout', 'margin_left_cm', v)} />
+                  </Col>
+                </Row>
+                <Row gutter={8} style={{ marginTop: 8 }}>
+                  <Col span={8}>
+                    <Typography.Text type="secondary">右边距(cm)</Typography.Text>
+                    <InputNumber value={pl?.margin_right_cm as number} style={{ width: '100%' }} size="small" step={0.1} onChange={v => updateField('page_layout', 'margin_right_cm', v)} />
+                  </Col>
+                </Row>
+              </Collapse.Panel>
+
+              <Collapse.Panel header="正文样式" key="body">
+                <Row gutter={8}>
+                  <Col span={8}>
+                    <Typography.Text type="secondary">中文字体</Typography.Text>
+                    <Input value={String(bodyFont?.east_asia_family || bodyFont?.family || '')} size="small" onChange={e => updateFontField('body_style', 'east_asia_family', e.target.value)} />
+                  </Col>
+                  <Col span={4}>
+                    <Typography.Text type="secondary">字号(pt)</Typography.Text>
+                    <InputNumber value={bodyFont?.size_pt as number} style={{ width: '100%' }} size="small" step={0.5} onChange={v => updateFontField('body_style', 'size_pt', v)} />
+                  </Col>
+                  <Col span={4}>
+                    <Typography.Text type="secondary">加粗</Typography.Text>
+                    <Select value={bodyFont?.bold ? 'yes' : 'no'} style={{ width: '100%' }} size="small" onChange={v => updateFontField('body_style', 'bold', v === 'yes')} options={[{ value: 'no', label: '否' }, { value: 'yes', label: '是' }]} />
+                  </Col>
+                  <Col span={4}>
+                    <Typography.Text type="secondary">行距</Typography.Text>
+                    <InputNumber value={bs?.line_spacing as number} style={{ width: '100%' }} size="small" step={0.1} onChange={v => updateField('body_style', 'line_spacing', v)} />
+                  </Col>
+                  <Col span={4}>
+                    <Typography.Text type="secondary">首行缩进(字)</Typography.Text>
+                    <InputNumber value={bs?.first_line_indent_chars as number} style={{ width: '100%' }} size="small" step={0.5} onChange={v => updateField('body_style', 'first_line_indent_chars', v)} />
+                  </Col>
+                </Row>
+              </Collapse.Panel>
+
+              {ts && (
+                <Collapse.Panel header="表格样式" key="table">
+                  <Row gutter={8}>
+                    <Col span={8}>
+                      <Typography.Text type="secondary">边框样式</Typography.Text>
+                      <Select value={String(ts.border_style || 'single')} style={{ width: '100%' }} size="small" onChange={v => updateField('table_style', 'border_style', v)} options={[{ value: 'single', label: '单线' }, { value: 'double', label: '双线' }, { value: 'three-line', label: '三线表' }, { value: 'none', label: '无边框' }]} />
+                    </Col>
+                    <Col span={4}>
+                      <Typography.Text type="secondary">线宽(pt)</Typography.Text>
+                      <InputNumber value={ts.border_width_pt as number} style={{ width: '100%' }} size="small" step={0.1} onChange={v => updateField('table_style', 'border_width_pt', v)} />
+                    </Col>
+                    <Col span={4}>
+                      <Typography.Text type="secondary">表头加粗</Typography.Text>
+                      <Select value={ts.header_bold ? 'yes' : 'no'} style={{ width: '100%' }} size="small" onChange={v => updateField('table_style', 'header_bold', v === 'yes')} options={[{ value: 'no', label: '否' }, { value: 'yes', label: '是' }]} />
+                    </Col>
+                    <Col span={8}>
+                      <Typography.Text type="secondary">表格对齐</Typography.Text>
+                      <Select value={String(ts.table_alignment || 'left')} style={{ width: '100%' }} size="small" onChange={v => updateField('table_style', 'table_alignment', v)} options={[{ value: 'left', label: '左' }, { value: 'center', label: '居中' }, { value: 'right', label: '右' }]} />
+                    </Col>
+                  </Row>
+                </Collapse.Panel>
+              )}
+
+              <Collapse.Panel header="原始 JSON 编辑" key="json">
+                {editJsonError && <Typography.Text type="danger" style={{ display: 'block', marginBottom: 4 }}>{editJsonError}</Typography.Text>}
+                <Input.TextArea
+                  value={editJsonText}
+                  rows={16}
+                  onChange={e => {
+                    setEditJsonText(e.target.value)
+                    try {
+                      const parsed = JSON.parse(e.target.value)
+                      setEditStyleConfig(parsed)
+                      setEditJsonError('')
+                    } catch {
+                      setEditJsonError('JSON 格式错误，修改后无法同步表单')
+                    }
+                  }}
+                  style={{ fontFamily: 'monospace', fontSize: 12 }}
+                />
+              </Collapse.Panel>
+            </Collapse>
+          )
+        })()}
       </Modal>
     </div>
   )

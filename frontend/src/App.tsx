@@ -7,6 +7,7 @@ import TaskDetailPage from './pages/TaskDetailPage'
 import ChatPage from './pages/ChatPage'
 import KbPage from './pages/KbPage'
 import ConfigPage from './pages/ConfigPage'
+import TemplatesPage from './pages/TemplatesPage'
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
         <Route path="tasks" element={<TasksPage />} />
         <Route path="tasks/:taskId" element={<TaskDetailPage />} />
         <Route path="chat" element={<ChatPage />} />
+        <Route path="templates" element={<TemplatesPage />} />
         <Route path="kb" element={<KbPage />} />
         <Route path="config" element={<ConfigPage />} />
       </Route>

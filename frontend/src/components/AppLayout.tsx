@@ -25,6 +25,7 @@ import {
   MenuUnfoldOutlined,
   BellOutlined,
   MessageOutlined,
+  FileExcelOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { getTaskStats } from '../services/api'
@@ -39,6 +40,7 @@ const menuItems: MenuItem[] = [
   { key: '/upload', icon: <UploadOutlined />, label: '文档上传' },
   { key: '/tasks', icon: <FileTextOutlined />, label: '任务管理' },
   { key: '/chat', icon: <MessageOutlined />, label: '对话排版' },
+  { key: '/templates', icon: <FileExcelOutlined />, label: '模板管理' },
   { key: '/kb', icon: <DatabaseOutlined />, label: '知识库' },
   { key: '/config', icon: <SettingOutlined />, label: '系统配置' },
 ]
