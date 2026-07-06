@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -141,6 +142,8 @@ class DocxStyleExtractor:
 
         result = {
             "page_layout": self._extract_page_layout(doc),
+            "cover_style": self._extract_cover_style(doc),
+            "preface_style": self._extract_preface_style(doc),
             "heading_styles": self._extract_heading_styles(doc, style_defs),
             "body_style": self._extract_body_style(doc, style_defs),
             "table_style": self._extract_table_style(doc),
@@ -152,7 +155,9 @@ class DocxStyleExtractor:
         }
 
         logger.info(
-            "DOCX 样式提取完成: %d 标题样式, 表格=%s, 列表=%s, 脚注=%s, 页眉页脚=%s",
+            "DOCX 样式提取完成: 封面=%s, 前言=%s, %d 标题样式, 表格=%s, 列表=%s, 脚注=%s, 页眉页脚=%s",
+            result["cover_style"] is not None,
+            result["preface_style"] is not None,
             len(result["heading_styles"]),
             result["table_style"] is not None,
             result["list_style"] is not None,
@@ -381,6 +386,141 @@ class DocxStyleExtractor:
 
         return layout
 
+    # ==================== 内容模式识别 ====================
+
+    # 国标文档常见标题模式
+    _HEADING_PATTERNS: list[tuple[int, re.Pattern]] = [
+        # 五级: 4.4.4.1 xxx
+        (5, re.compile(r'^\d+\.\d+\.\d+\.\d+\.\d+\s+\S')),
+        # 四级: 4.4.4.1 xxx
+        (4, re.compile(r'^\d+\.\d+\.\d+\.\d+\s+\S')),
+        # 三级: 4.2.1 xxx
+        (3, re.compile(r'^\d+\.\d+\.\d+\s+\S')),
+        # 二级: 4.1 xxx
+        (2, re.compile(r'^\d+\.\d+\s+\S')),
+        # 一级: 1 范围 / 2 规范性引用文件
+        (1, re.compile(r'^\d+\s+\S')),
+    ]
+
+    # 特殊标题模式（一级）
+    _SPECIAL_HEADING_PATTERNS = [
+        re.compile(r'^前言$'),
+        re.compile(r'^引言$'),
+        re.compile(r'^附录\s*[A-Z]'),
+        re.compile(r'^第[一二三四五六七八九十]+\s*(法|部分|章|节)'),
+        re.compile(r'^参考文献$'),
+    ]
+
+    def _classify_heading_level_by_content(self, text: str) -> int | None:
+        """基于内容模式识别标题级别
+
+        用于文档不使用标准 Heading 样式的后备方案。
+        识别国标文档常见的条款编号格式。
+
+        Args:
+            text: 段落文本（已 strip）
+
+        Returns:
+            标题级别 (1-5)，非标题返回 None
+        """
+        # 检查特殊标题
+        for pattern in self._SPECIAL_HEADING_PATTERNS:
+            if pattern.match(text):
+                return 1
+
+        # 检查编号格式（从高到低，避免误匹配）
+        for level, pattern in self._HEADING_PATTERNS:
+            if pattern.match(text):
+                return level
+
+        return None
+
+    def _is_cover_or_preface(self, paragraph) -> str | None:
+        """判断段落是否属于封面或前言区域
+
+        Returns:
+            'cover' / 'preface' / None
+        """
+        text = paragraph.text.strip()
+        if not text:
+            return None
+
+        # 封面特征：大字号(>14pt)、居中、加粗
+        try:
+            font_config = self._extract_font_from_paragraph(paragraph)
+            size_pt = font_config.get("size_pt", 0)
+            bold = font_config.get("bold", False)
+            alignment = self._extract_alignment(paragraph)
+            is_center = alignment == "center"
+            is_large = size_pt and size_pt >= 14
+
+            if is_large and is_center:
+                return "cover"
+        except Exception:
+            pass
+
+        return None
+
+    # ==================== 封面/前言样式 ====================
+
+    def _extract_cover_style(self, doc: Document) -> dict | None:
+        """提取封面样式
+
+        策略：扫描前 20 个段落，找出大字号居中段落作为封面样式。
+        """
+        cover_paragraphs = []
+        for paragraph in doc.paragraphs[:20]:
+            if not paragraph.text.strip():
+                continue
+            if self._is_cover_or_preface(paragraph) == "cover":
+                cover_paragraphs.append(paragraph)
+
+        if not cover_paragraphs:
+            return None
+
+        sample = cover_paragraphs[:min(5, len(cover_paragraphs))]
+        font_configs = [self._extract_font_from_paragraph(p) for p in sample]
+        alignments = [self._extract_alignment(p) for p in sample]
+        line_spacings = [self._extract_line_spacing_full(p) for p in sample]
+
+        result = {
+            "description": "封面区域样式",
+            "font": self._merge_font_configs(font_configs),
+            "alignment": Counter(alignments).most_common(1)[0][0] if alignments else "center",
+        }
+        ls, ls_pt, ls_rule = self._most_common_tuple(line_spacings)
+        result["line_spacing"] = ls
+        result["line_spacing_pt"] = ls_pt
+        result["line_spacing_rule"] = ls_rule
+        result.setdefault("space_before_pt", 0)
+        result.setdefault("space_after_pt", 0)
+        return result
+
+    def _extract_preface_style(self, doc: Document) -> dict | None:
+        """提取前言标题样式
+
+        策略：查找包含「前言」或「引言」的段落，提取其样式。
+        """
+        for paragraph in doc.paragraphs:
+            text = paragraph.text.strip()
+            if text in ("前言", "引言") or text.startswith("前言") or text.startswith("引言"):
+                font_config = self._extract_font_from_paragraph(paragraph)
+                alignment = self._extract_alignment(paragraph)
+                ls, ls_pt, ls_rule = self._extract_line_spacing_full(paragraph)
+                sb, sa = self._extract_spacing(paragraph)
+                result = {
+                    "description": "前言/引言标题样式",
+                    "font": font_config,
+                    "alignment": alignment,
+                    "line_spacing": ls,
+                    "line_spacing_pt": ls_pt,
+                    "line_spacing_rule": ls_rule,
+                    "space_before_pt": sb,
+                    "space_after_pt": sa,
+                }
+                return result
+        return None
+
     # ==================== 标题样式 ====================
 
     def _extract_heading_styles(
@@ -391,6 +531,7 @@ class DocxStyleExtractor:
         策略：
         1. 先从样式定义表获取基线
         2. 从文档段落中采样，取最常见的直接格式覆盖基线
+        3. 如果没有标准 Heading 样式段落，使用内容模式识别后备方案
         """
         # 按级别收集标题段落
         heading_paragraphs: dict[int, list] = {}
@@ -402,6 +543,20 @@ class DocxStyleExtractor:
             if level not in heading_paragraphs:
                 heading_paragraphs[level] = []
             heading_paragraphs[level].append(paragraph)
+
+        # 后备方案：如果没找到标准 Heading 样式段落，使用内容模式识别
+        if not heading_paragraphs:
+            for paragraph in doc.paragraphs:
+                text = paragraph.text.strip()
+                if not text:
+                    continue
+                level = self._classify_heading_level_by_content(text)
+                if level is not None:
+                    if level not in heading_paragraphs:
+                        heading_paragraphs[level] = []
+                    heading_paragraphs[level].append(paragraph)
+            if heading_paragraphs:
+                logger.info("内容模式识别到 %d 级标题", len(heading_paragraphs))
 
         heading_styles: dict[int, dict] = {}
 
@@ -484,7 +639,8 @@ class DocxStyleExtractor:
         策略：
         1. 先从 Normal 样式定义获取基线
         2. 从文档正文中采样多个非标题段落
-        3. 取最常见的样式
+        3. 排除封面/前言/标题段落，避免污染正文样式
+        4. 取最常见的样式
         """
         # 基线
         base = dict(style_defs.get("body", {}))
@@ -506,6 +662,12 @@ class DocxStyleExtractor:
             if "Header" in style_name or "Footer" in style_name:
                 continue
             if not paragraph.text.strip():
+                continue
+            # 排除封面段落（大字号居中）
+            if self._is_cover_or_preface(paragraph) == "cover":
+                continue
+            # 排除内容模式识别到的标题段落
+            if self._classify_heading_level_by_content(paragraph.text.strip()) is not None:
                 continue
             body_paragraphs.append(paragraph)
 

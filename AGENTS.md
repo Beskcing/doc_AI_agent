@@ -58,3 +58,4 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-06 | feat | 新增Word文档样式模板提取：从GB/T 14454.13-2008CN.docx提取完整排版模板(封面/前言/1~5级条款/正文/表格/列表/注释/页眉页脚)，基于内容模式+格式特征推断条款层级，输出StyleConfig兼容JSON |
 | 2026-07-06 | feat | 新增模板注册脚本(scripts/register_template.py)：将预提取JSON模板通过API注册到DB，创建任务时可指定template_id跳过LLM样式提取 |
 | 2026-07-06 | feat | 新增模板管理页面(TemplatesPage)：模板列表/上传docx提取/查看详情/编辑样式配置(JSON+表单)/删除；侧边栏新增「模板管理」菜单(/templates)；任务详情页新增「修正样式」功能(加载当前style_config→表单/JSON编辑→重新渲染DOCX) |
+| 2026-07-06 | fix | 增强DocxStyleExtractor样式提取完整性：新增内容模式识别标题级别(正则匹配国标条款编号1~5级)、新增封面/前言样式提取方法、正文采样排除封面和标题段落避免污染；ChatPage样式编辑器新增封面/前言可编辑面板 |

@@ -55,6 +55,8 @@ interface ChatMessage {
 
 interface StyleConfig {
   page_layout?: Record<string, unknown>
+  cover_style?: Record<string, unknown> | null
+  preface_style?: Record<string, unknown> | null
   heading_styles?: Array<Record<string, unknown>>
   body_style?: Record<string, unknown>
   table_style?: Record<string, unknown> | null
@@ -304,6 +306,10 @@ const ChatPage: React.FC = () => {
     const bs = styleConfig.body_style as Record<string, unknown> | undefined
     const bodyFont = bs?.font as Record<string, unknown> | undefined
     const hs = styleConfig.heading_styles as Array<Record<string, unknown>> | undefined
+    const cs = styleConfig.cover_style as Record<string, unknown> | undefined | null
+    const ps = styleConfig.preface_style as Record<string, unknown> | undefined | null
+    const coverFont = cs?.font as Record<string, unknown> | undefined
+    const prefaceFont = ps?.font as Record<string, unknown> | undefined
 
     return (
       <Collapse defaultActiveKey={['page', 'body']} size="small">
@@ -401,6 +407,152 @@ const ChatPage: React.FC = () => {
             </Row>
           </Space>
         </Panel>
+
+        {cs && (
+          <Panel header="封面样式" key="cover">
+            <Space direction="vertical" style={{ width: '100%' }} size="small">
+              <Row gutter={8}>
+                <Col span={12}>
+                  <Text type="secondary">中文字体</Text>
+                  <Input
+                    value={String(coverFont?.east_asia_family || coverFont?.family || '')}
+                    size="small"
+                    onChange={e => setStyleConfig({
+                      ...styleConfig,
+                      cover_style: { ...cs, font: { ...coverFont, east_asia_family: e.target.value } },
+                    })}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Text type="secondary">字号(pt)</Text>
+                  <InputNumber
+                    value={coverFont?.size_pt as number}
+                    style={{ width: '100%' }}
+                    size="small"
+                    step={0.5}
+                    onChange={v => setStyleConfig({
+                      ...styleConfig,
+                      cover_style: { ...cs, font: { ...coverFont, size_pt: v } },
+                    })}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Text type="secondary">加粗</Text>
+                  <Select
+                    value={coverFont?.bold ? 'yes' : 'no'}
+                    style={{ width: '100%' }}
+                    size="small"
+                    onChange={v => setStyleConfig({
+                      ...styleConfig,
+                      cover_style: { ...cs, font: { ...coverFont, bold: v === 'yes' } },
+                    })}
+                    options={[{ value: 'no', label: '否' }, { value: 'yes', label: '是' }]}
+                  />
+                </Col>
+              </Row>
+              <Row gutter={8}>
+                <Col span={12}>
+                  <Text type="secondary">对齐</Text>
+                  <Select
+                    value={String(cs.alignment || 'center')}
+                    style={{ width: '100%' }}
+                    size="small"
+                    onChange={v => setStyleConfig({ ...styleConfig, cover_style: { ...cs, alignment: v } })}
+                    options={[
+                      { value: 'left', label: '左对齐' },
+                      { value: 'center', label: '居中' },
+                      { value: 'right', label: '右对齐' },
+                      { value: 'justify', label: '两端对齐' },
+                    ]}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Text type="secondary">行距</Text>
+                  <InputNumber
+                    value={cs.line_spacing as number}
+                    style={{ width: '100%' }}
+                    size="small"
+                    step={0.1}
+                    onChange={v => setStyleConfig({ ...styleConfig, cover_style: { ...cs, line_spacing: v } })}
+                  />
+                </Col>
+              </Row>
+            </Space>
+          </Panel>
+        )}
+
+        {ps && (
+          <Panel header="前言样式" key="preface">
+            <Space direction="vertical" style={{ width: '100%' }} size="small">
+              <Row gutter={8}>
+                <Col span={12}>
+                  <Text type="secondary">中文字体</Text>
+                  <Input
+                    value={String(prefaceFont?.east_asia_family || prefaceFont?.family || '')}
+                    size="small"
+                    onChange={e => setStyleConfig({
+                      ...styleConfig,
+                      preface_style: { ...ps, font: { ...prefaceFont, east_asia_family: e.target.value } },
+                    })}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Text type="secondary">字号(pt)</Text>
+                  <InputNumber
+                    value={prefaceFont?.size_pt as number}
+                    style={{ width: '100%' }}
+                    size="small"
+                    step={0.5}
+                    onChange={v => setStyleConfig({
+                      ...styleConfig,
+                      preface_style: { ...ps, font: { ...prefaceFont, size_pt: v } },
+                    })}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Text type="secondary">加粗</Text>
+                  <Select
+                    value={prefaceFont?.bold ? 'yes' : 'no'}
+                    style={{ width: '100%' }}
+                    size="small"
+                    onChange={v => setStyleConfig({
+                      ...styleConfig,
+                      preface_style: { ...ps, font: { ...prefaceFont, bold: v === 'yes' } },
+                    })}
+                    options={[{ value: 'no', label: '否' }, { value: 'yes', label: '是' }]}
+                  />
+                </Col>
+              </Row>
+              <Row gutter={8}>
+                <Col span={12}>
+                  <Text type="secondary">对齐</Text>
+                  <Select
+                    value={String(ps.alignment || 'center')}
+                    style={{ width: '100%' }}
+                    size="small"
+                    onChange={v => setStyleConfig({ ...styleConfig, preface_style: { ...ps, alignment: v } })}
+                    options={[
+                      { value: 'left', label: '左对齐' },
+                      { value: 'center', label: '居中' },
+                      { value: 'right', label: '右对齐' },
+                      { value: 'justify', label: '两端对齐' },
+                    ]}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Text type="secondary">行距</Text>
+                  <InputNumber
+                    value={ps.line_spacing as number}
+                    style={{ width: '100%' }}
+                    size="small"
+                    step={0.1}
+                    onChange={v => setStyleConfig({ ...styleConfig, preface_style: { ...ps, line_spacing: v } })}
+                  />
+                </Col>
+              </Row>
+            </Space>
+          </Panel>
+        )}
 
         <Panel header="正文样式" key="body">
           <Space direction="vertical" style={{ width: '100%' }} size="small">
