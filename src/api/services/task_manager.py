@@ -1409,6 +1409,9 @@ class TaskManager:
     def update_content_via_llm(self, task_id: str, message: str, session_id: str | None = None) -> dict:
         """通过 LLM 对话修改文档内容
 
+        大文档（>10000字符）使用 diff 模式，LLM 只输出修改操作而非完整文档。
+        小文档使用全量替换模式。
+
         Args:
             task_id: 任务 ID
             message: 用户修改指令
@@ -1431,38 +1434,19 @@ class TaskManager:
             else:
                 raise ValueError("任务无内容可编辑")
 
-        # 加载提示词
-        prompt_path = Path("prompts/content_edit_prompt.md")
-        if prompt_path.exists():
-            prompt_template = prompt_path.read_text(encoding="utf-8")
-        else:
-            prompt_template = (
-                "你是一个国标文档内容编辑专家。用户会用自然语言描述对文档内容的修改需求，"
-                "你需要根据用户的指令修改当前的 Markdown 内容。\n\n"
-                "## 当前文档内容\n\n{current_content}\n\n"
-                "## 用户修改指令\n\n{message}\n\n"
-                "## 修改规则\n\n"
-                "1. 只修改用户明确提到的部分，保持其他内容不变\n"
-                "2. 保持 Markdown 格式和结构不变\n"
-                "3. 输出完整的修改后的 Markdown 内容\n\n"
-                "## 输出格式\n\n"
-                "请输出 JSON 格式：\n"
-                '- `reply`: 对修改内容的简要说明\n'
-                '- `markdown`: 修改后的完整 Markdown 内容\n'
+        content_len = len(markdown_content)
+
+        # 根据文档大小选择模式
+        if content_len > 10000:
+            # 大文档：diff 模式 - LLM 只输出修改操作
+            updated_markdown, reply = self._llm_edit_content_diff_mode(
+                markdown_content, message
             )
-
-        # 构建提示词
-        prompt = prompt_template.replace("{current_content}", markdown_content)
-        prompt = prompt.replace("{message}", message)
-
-        # 调用 LLM
-        llm_client = self._get_llm_client()
-        response = llm_client.invoke(prompt)
-
-        # 解析响应
-        result = safe_parse_llm_json(response)
-        reply = result.get("reply", "内容已修改")
-        updated_markdown = result.get("markdown", markdown_content)
+        else:
+            # 小文档：全量模式 - LLM 输出完整修改后文档
+            updated_markdown, reply = self._llm_edit_content_full_mode(
+                markdown_content, message
+            )
 
         # 保存修改后的内容
         result_dir = Path("data/output") / task_id
@@ -1499,12 +1483,129 @@ class TaskManager:
         finally:
             db.close()
 
-        logger.info("任务 %s: LLM 内容修改完成", task_id)
+        logger.info("任务 %s: LLM 内容修改完成 (mode=%s, content_len=%d)",
+                    task_id, "diff" if content_len > 10000 else "full", content_len)
         return {
             "reply": reply,
             "updated_markdown": updated_markdown,
             "task_id": task_id,
         }
+
+    def _llm_edit_content_full_mode(self, markdown_content: str, message: str) -> tuple[str, str]:
+        """全量模式：LLM 输出完整修改后文档（适用于小文档 ≤10000 字符）"""
+        prompt_path = Path("prompts/content_edit_prompt.md")
+        if prompt_path.exists():
+            prompt_template = prompt_path.read_text(encoding="utf-8")
+        else:
+            prompt_template = (
+                "你是一个国标文档内容编辑专家。请根据用户指令修改 Markdown 内容。\n\n"
+                "## 当前文档内容\n\n{current_content}\n\n"
+                "## 用户修改指令\n\n{message}\n\n"
+                "## 输出格式\n\n请输出 JSON 格式：\n"
+                '- `reply`: 对修改内容的简要说明\n'
+                '- `markdown`: 修改后的完整 Markdown 内容\n'
+            )
+
+        prompt = prompt_template.replace("{current_content}", markdown_content)
+        prompt = prompt.replace("{message}", message)
+
+        llm_client = self._get_llm_client()
+        response = llm_client.invoke(prompt)
+        result = safe_parse_llm_json(response)
+        reply = result.get("reply", "内容已修改")
+        updated_markdown = result.get("markdown", markdown_content)
+        return updated_markdown, reply
+
+    def _llm_edit_content_diff_mode(self, markdown_content: str, message: str) -> tuple[str, str]:
+        """Diff 模式：LLM 只输出修改操作（适用于大文档 >10000 字符）
+
+        发送文档头部 + 尾部作为上下文，LLM 输出具体操作指令，
+        后端根据指令修改原文档。
+        """
+        # 截取文档摘要：头部 4000 + 尾部 3000 字符
+        head = markdown_content[:4000]
+        tail = markdown_content[-3000:] if len(markdown_content) > 7000 else ""
+        content_summary = head
+        if tail:
+            content_summary += f"\n\n... (中间省略 {len(markdown_content) - 7000} 字符) ...\n\n{tail}"
+
+        prompt = (
+            "你是一个国标文档内容编辑专家。用户会描述对文档的修改需求。\n\n"
+            "## 文档摘要（首尾部分）\n\n"
+            f"{content_summary}\n\n"
+            f"## 文档总长度: {len(markdown_content)} 字符\n\n"
+            f"## 用户修改指令\n\n{message}\n\n"
+            "## 修改操作格式\n\n"
+            "请输出严格的 JSON 格式，描述如何修改文档：\n"
+            "{\n"
+            '  "reply": "对修改的简要说明",\n'
+            '  "action": "append" | "replace" | "insert",\n'
+            '  "content": "要追加/插入的新内容",\n'
+            '  "search": "要替换的原文片段（仅 replace 操作需要）",\n'
+            '  "position": "end" | "beginning" | 具体描述（仅 insert 操作需要）\n'
+            "}\n\n"
+            "注意：action 说明：\n"
+            "- append: 在文档末尾追加内容\n"
+            "- replace: 查找 search 文本并替换为 content 文本\n"
+            "- insert: 在指定位置插入内容\n"
+        )
+
+        llm_client = self._get_llm_client()
+        response = llm_client.invoke(prompt)
+
+        try:
+            result = safe_parse_llm_json(response)
+        except Exception:
+            # JSON 解析失败时，尝试将用户指令作为追加内容
+            logger.warning("Diff 模式 JSON 解析失败，回退为追加模式")
+            return (
+                markdown_content + f"\n\n{message}\n",
+                "已将用户指令作为内容追加到文档末尾（JSON 解析失败回退）",
+            )
+
+        reply = result.get("reply", "内容已修改")
+        action = result.get("action", "append")
+        new_content = result.get("content", "")
+
+        if action == "append":
+            updated = markdown_content + f"\n\n{new_content}"
+        elif action == "replace":
+            search_text = result.get("search", "")
+            if search_text and search_text in markdown_content:
+                updated = markdown_content.replace(search_text, new_content, 1)
+            else:
+                # search 文本未找到，回退为追加
+                updated = markdown_content + f"\n\n{new_content}"
+                reply += "（原文未找到匹配片段，已追加到末尾）"
+        elif action == "insert":
+            position = result.get("position", "end")
+            if position == "beginning":
+                updated = new_content + "\n\n" + markdown_content
+            elif position == "end":
+                updated = markdown_content + "\n\n" + new_content
+            else:
+                # 尝试在指定标题后插入
+                import re
+                pattern = re.compile(re.escape(position), re.IGNORECASE)
+                match = pattern.search(markdown_content)
+                if match:
+                    insert_pos = match.end()
+                    # 找到该行的末尾
+                    next_newline = markdown_content.find("\n", insert_pos)
+                    if next_newline == -1:
+                        next_newline = len(markdown_content)
+                    updated = (
+                        markdown_content[:next_newline]
+                        + f"\n\n{new_content}"
+                        + markdown_content[next_newline:]
+                    )
+                else:
+                    updated = markdown_content + f"\n\n{new_content}"
+                    reply += "（未找到指定位置，已追加到末尾）"
+        else:
+            updated = markdown_content + f"\n\n{new_content}"
+
+        return updated, reply
 
 
 # 全局任务管理器实例
