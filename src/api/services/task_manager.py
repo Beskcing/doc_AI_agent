@@ -151,7 +151,10 @@ class TaskManager:
             return intent
 
     def _default_style_config(self) -> dict:
-        """默认样式配置（LLM 降级用）"""
+        """默认样式配置（LLM 降级用）
+
+        键名严格对齐 StyleConfig 模型，确保 StyleConfig.model_validate() 可通过。
+        """
         return {
             "page_layout": {
                 "paper_size": "A4",
@@ -159,26 +162,34 @@ class TaskManager:
                 "margin_bottom_cm": 3.5,
                 "margin_left_cm": 2.8,
                 "margin_right_cm": 2.6,
+                "header_distance_cm": 1.5,
+                "footer_distance_cm": 1.75,
             },
-            "title": {
-                "font": "方正小标宋简体",
-                "size_pt": 22,
-                "align": "center",
-                "bold": True,
-            },
-            "body": {
-                "font": "仿宋_GB2312",
-                "size_pt": 16,
+            "heading_styles": [
+                {
+                    "level": 1,
+                    "font": {"family": "黑体", "size_pt": 22, "bold": True},
+                    "alignment": "center",
+                    "line_spacing": 2.0,
+                },
+                {
+                    "level": 2,
+                    "font": {"family": "黑体", "size_pt": 16, "bold": True},
+                    "alignment": "left",
+                    "line_spacing": 1.5,
+                },
+            ],
+            "body_style": {
+                "font": {"family": "仿宋_GB2312", "size_pt": 16},
                 "line_spacing": 1.5,
-                "first_line_indent": 2,
+                "first_line_indent_chars": 2,
+                "alignment": "justify",
             },
-            "heading": {
-                "font": "黑体",
-                "size_pt": 16,
-                "bold": True,
-            },
-            "table": {
-                "border_width": 1,
+            "table_style": {
+                "border_style": "single",
+                "border_width_pt": 0.5,
+                "header_font": {"family": "黑体", "size_pt": 12, "bold": True},
+                "body_font": {"family": "仿宋_GB2312", "size_pt": 10.5},
                 "header_bold": True,
             },
             "rag_sources": [],
@@ -251,9 +262,19 @@ class TaskManager:
         current_step: str | None = None,
         error_message: str | None = None,
     ) -> TaskModel | None:
-        """更新任务状态"""
+        """更新任务状态
+
+        Bug 修复：如果任务已被取消（cancelled），不允许被 processing 覆盖。
+        仅允许 cancelled → cancelled（幂等）或终态覆盖。
+        """
         db = _get_db()
         try:
+            # 检查竞态：如果任务已取消且新状态是 processing，跳过更新
+            if status == "processing":
+                existing = TaskCRUD.get(db, task_id)
+                if existing and existing.status == "cancelled":
+                    logger.info("任务 %s 已被取消，跳过 processing 状态更新", task_id)
+                    return existing
             return TaskCRUD.update_status(
                 db, task_id, status=status, progress=progress,
                 current_step=current_step, error_message=error_message,
@@ -348,6 +369,10 @@ class TaskManager:
             task = TaskCRUD.get(db, task_id)
             if not task:
                 logger.error("任务不存在: %s", task_id)
+                return
+            # Bug 修复：检查任务是否已被取消
+            if task.status == "cancelled":
+                logger.info("任务 %s 已被取消，跳过处理", task_id)
                 return
             config = task.config or {}
             file_path = config.get("file_path")
@@ -461,6 +486,11 @@ class TaskManager:
             self.update_status(task_id, "completed", progress=100, current_step="completed")
         except Exception as e:
             logger.exception("任务 %s 处理失败", task_id)
+            # Bug 修复：检查任务是否已被取消，避免覆盖 cancelled 状态
+            current_task = self.get_task(task_id)
+            if current_task and current_task.status == "cancelled":
+                logger.info("任务 %s 已被取消，不覆盖为 failed 状态", task_id)
+                return
             self.update_status(task_id, "failed", error_message=str(e))
 
     def _generate_style_config(self, task_id: str, markdown_content: str, intent: IntentAnalysis) -> dict:

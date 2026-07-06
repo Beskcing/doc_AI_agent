@@ -277,10 +277,10 @@ def main():
         except Exception as e:
             log_test("任务详情", False, str(e))
 
-        # 轮询状态（最多等 120 秒）
-        print("  轮询任务状态 (最多120秒)...")
+        # 轮询状态（最多等 360 秒 = 6 分钟）
+        print("  轮询任务状态 (最多360秒)...")
         final_status = None
-        for i in range(40):  # 40 * 3s = 120s
+        for i in range(120):  # 120 * 3s = 360s = 6min
             try:
                 result = api_get(f"/api/tasks/{task_id}/status")
                 final_status = result["data"]["status"]

@@ -103,7 +103,7 @@ log("Bug#4: style_config_preview 已设置", detail.get("style_config_preview") 
 style_cfg = detail.get("style_config_preview", {})
 if style_cfg:
     log("  style_config 含 page_layout", "page_layout" in style_cfg)
-    log("  style_config 含 body", "body" in style_cfg)
+    log("  style_config 含 body_style", "body_style" in style_cfg)
     log("  style_config 含 rag_sources", "rag_sources" in style_cfg)
 
 # Bug#5: 下载文件 (HTTP状态码)

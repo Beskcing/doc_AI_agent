@@ -191,3 +191,4 @@ async def rebuild_kb_index() -> ResponseModel:
     except Exception as e:
         logger.exception("知识库重建失败")
         return ResponseModel(code=500, message=f"知识库重建失败: {e}")
+
