@@ -52,7 +52,7 @@ export default function DocEditor({ initialHtml, onChange, disabled, onEditorIni
           'table', 'code', 'wordcount',
         ],
         toolbar: [
-          'undo redo | styles fontfamily fontsize | bold italic underline strikethrough | forecolor backcolor',
+          'undo redo | styles fontfamily fontsizeselect | bold italic underline strikethrough | forecolor backcolor',
           'alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | table | removeformat code',
         ].join(' | '),
         content_style: `
