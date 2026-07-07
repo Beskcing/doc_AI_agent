@@ -217,7 +217,7 @@ class PipelineService:
 
         try:
             prompt = self.deps.intent_prompt.replace("{markdown_content}", markdown_content[:3000])
-            response = llm.invoke(prompt, self.deps.system_prompt or None)
+            response = llm.invoke(prompt, self.deps.system_prompt or None).content
             try:
                 json_data = safe_parse_llm_json(response)
                 intent = IntentAnalysis.model_validate(json_data)
@@ -339,7 +339,7 @@ class PipelineService:
             few_shot = self._get_few_shot_examples(standard=intent.detected_standard, limit=3)
             prompt = prompt.replace("{few_shot_examples}", few_shot)
 
-            response = llm.invoke(prompt, self.deps.system_prompt or None)
+            response = llm.invoke(prompt, self.deps.system_prompt or None).content
             json_data = safe_parse_llm_json(response)
             if rag_sources:
                 json_data["rag_sources"] = rag_sources

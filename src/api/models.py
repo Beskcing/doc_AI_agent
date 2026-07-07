@@ -306,6 +306,13 @@ class ContentEditRequest(BaseModel):
     session_id: str | None = Field(default=None, description="会话 ID")
 
 
+class ChatStreamRequest(BaseModel):
+    """流式对话请求"""
+
+    message: str = Field(description="用户消息")
+    system_prompt: str | None = Field(default=None, description="系统提示词")
+
+
 # ────────── 系统配置 ──────────
 class SystemConfig(BaseModel):
     """系统配置"""

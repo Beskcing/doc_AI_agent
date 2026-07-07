@@ -21,10 +21,11 @@ class ServiceDeps:
     封装 LLM/RAG/Prompts 的懒加载逻辑，避免各服务类重复实现。
     """
 
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, enable_rag: bool = True):
         self.config = config
         self._llm_client: LLMClient | None = None
         self._retriever = None
+        self._rag_enabled: bool = enable_rag
         self._prompts_loaded: bool = False
         self._system_prompt: str = ""
         self._intent_prompt: str = ""
@@ -42,6 +43,8 @@ class ServiceDeps:
 
     def get_retriever(self):
         """懒加载 RAG 混合检索器，初始化失败时返回 None"""
+        if not self._rag_enabled:
+            return None
         if self._retriever is None:
             try:
                 from src.rag.knowledge_base_config import KnowledgeBaseManager

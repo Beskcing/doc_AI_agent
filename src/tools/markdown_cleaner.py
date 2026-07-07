@@ -212,7 +212,7 @@ class MarkdownCleaner:
         prompt = self._build_review_prompt(markdown, context)
 
         try:
-            response = self.llm_client.invoke(prompt)
+            response = self.llm_client.invoke(prompt).content
             # 从 LLM 响应中提取清洗后的 Markdown
             cleaned = self._extract_cleaned_markdown(response)
             marked_count = cleaned.count(self.OCR_ERROR_MARK)
@@ -315,7 +315,7 @@ class MarkdownCleaner:
         """审查单个文本块"""
         prompt = self._build_review_prompt(chunk, context)
         try:
-            response = self.llm_client.invoke(prompt)
+            response = self.llm_client.invoke(prompt).content
             cleaned = self._extract_cleaned_markdown(response)
             marked_count = cleaned.count(self.OCR_ERROR_MARK)
             return CleaningResult(

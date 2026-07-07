@@ -287,7 +287,7 @@ class ContentEditService:
         prompt = prompt.replace("{message}", message)
 
         llm_client = self.deps.get_llm_client()
-        response = llm_client.invoke(prompt)
+        response = llm_client.invoke(prompt).content
         result = safe_parse_llm_json(response)
         reply = result.get("reply", "内容已修改")
         updated_markdown = result.get("markdown", markdown_content)
@@ -323,7 +323,7 @@ class ContentEditService:
         )
 
         llm_client = self.deps.get_llm_client()
-        response = llm_client.invoke(prompt)
+        response = llm_client.invoke(prompt).content
 
         try:
             result = safe_parse_llm_json(response)

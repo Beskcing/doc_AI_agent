@@ -11,16 +11,18 @@ import argparse
 import json
 import sys
 import time
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from src.api.services.pipeline_service import PipelineService
+from src.api.services.service_deps import ServiceDeps
 from src.config import AppConfig
-from src.llm_client import LLMClient
-from src.rag.knowledge_base_config import KnowledgeBaseManager
+from src.db.database import init_db
+from src.db.session import get_db_session
 from src.utils.file_utils import ensure_dir, write_text_file
 from src.utils.logger import get_logger, setup_logging
-from src.workflows.doc_formatting_graph import create_formatting_graph
 
 logger = get_logger(__name__)
 
@@ -73,69 +75,97 @@ def main():
     logger.info("目标标准: %s", args.standard or "(自动检测)")
     logger.info("LLM Provider: %s", config.llm.default_provider)
 
-    # 初始化 LLM 客户端
-    llm_client = LLMClient(config.llm, provider=args.provider)
+    # 初始化数据库
+    init_db()
 
-    # 初始化 RAG
-    retriever = None
+    # 使用 ServiceDeps + PipelineService（与 API 路径一致）
+    deps = ServiceDeps(config, enable_rag=not args.no_rag)
     if not args.no_rag:
-        try:
-            kb_manager = KnowledgeBaseManager(config.rag)
-            kb_manager.initialize()
-            retriever = kb_manager.get_retriever()
-            logger.info("RAG 知识库已加载")
-        except Exception as e:
-            logger.warning("RAG 知识库初始化失败: %s，将不使用 RAG", e)
+        logger.info("RAG 知识库将按需加载")
+    else:
+        logger.info("已禁用 RAG 知识库")
 
-    # 构建并运行工作流
-    graph = create_formatting_graph(llm_client, retriever, config)
+    pipeline = PipelineService(deps, update_status=lambda *a, **kw: None)
 
-    initial_state = {
-        "input_path": str(input_path),
-        "target_standard": args.standard,
-        "user_requirements": "",
-        "retry_count": 0,
-        "error": None,
-    }
+    # 创建 DB 任务记录
+    task_id = str(uuid.uuid4())
+    with get_db_session() as db:
+        from src.db.crud import TaskCRUD
+
+        TaskCRUD.create(
+            db,
+            id=task_id,
+            upload_id=task_id,
+            filename=input_path.name,
+            standard=args.standard or "",
+            status="processing",
+            progress=0,
+            current_step="init",
+            config={"cli_mode": True, "file_path": str(input_path)},
+        )
 
     logger.info("-" * 60)
-    logger.info("开始执行工作流...")
-    result = graph.invoke(initial_state)
+    logger.info("开始执行工作流 (task_id=%s)...", task_id)
+
+    error_msg = None
+    cleaned_md = ""
+    styled_path = None
+    style_config = {}
+
+    try:
+        cleaned_md, styled_path, _mineru_docx, style_config = pipeline.process_task(
+            task_id=task_id,
+            file_path=str(input_path),
+            target_standard=args.standard,
+            template_id=None,
+            config={"cli_mode": True},
+        )
+        # 更新任务状态为完成
+        with get_db_session() as db:
+            from src.db.crud import TaskCRUD
+            TaskCRUD.update_status(
+                db, task_id, status="completed", progress=100,
+                current_step="done", error_message=None,
+            )
+            from datetime import datetime as _dt
+            task_db = TaskCRUD.get(db, task_id)
+            if task_db:
+                task_db.completed_at = _dt.now()
+                task_db.result_path = styled_path
+                db.commit()
+        logger.info("工作流执行成功！")
+    except Exception as e:
+        error_msg = str(e)
+        logger.error("工作流错误: %s", e)
+        with get_db_session() as db:
+            from src.db.crud import TaskCRUD
+            TaskCRUD.update_status(
+                db, task_id, status="failed", error_message=error_msg,
+            )
 
     # 输出结果
     elapsed = time.time() - start_time
     logger.info("-" * 60)
 
-    if result.get("error"):
-        logger.error("工作流错误: %s", result["error"])
-    else:
-        logger.info("工作流执行成功！")
-
-    if result.get("final_output_path"):
-        logger.info("输出文件: %s", result["final_output_path"])
-
-    if result.get("cleaning_log"):
-        logger.info("清洗日志:")
-        for log_entry in result["cleaning_log"]:
-            logger.info("  - %s", log_entry)
-
-    if result.get("style_report"):
-        report = result["style_report"]
-        logger.info("样式报告: %d 段落, %d 标题, %d 表格", 
-                     report.get("paragraphs_styled", 0),
-                     report.get("headings_styled", 0),
-                     report.get("tables_styled", 0))
+    if styled_path and not args.skip_render:
+        logger.info("输出文件: %s", styled_path)
+        # 复制到用户指定的输出路径
+        if args.output and args.output != "data/output/output.docx":
+            import shutil
+            ensure_dir(Path(args.output).parent)
+            shutil.copy2(styled_path, args.output)
+            logger.info("已复制到: %s", args.output)
 
     # 额外输出
-    if args.output_json and result.get("style_config"):
+    if args.output_json and style_config:
         json_path = write_text_file(
             args.output_json,
-            json.dumps(result["style_config"], ensure_ascii=False, indent=2),
+            json.dumps(style_config, ensure_ascii=False, indent=2),
         )
         logger.info("样式配置已保存: %s", json_path)
 
-    if args.output_markdown and result.get("cleaned_markdown"):
-        md_path = write_text_file(args.output_markdown, result["cleaned_markdown"])
+    if args.output_markdown and cleaned_md:
+        md_path = write_text_file(args.output_markdown, cleaned_md)
         logger.info("清洗后 Markdown 已保存: %s", md_path)
 
     logger.info("=" * 60)
@@ -143,7 +173,7 @@ def main():
     logger.info("=" * 60)
 
     # 退出码
-    sys.exit(1 if result.get("error") else 0)
+    sys.exit(1 if error_msg else 0)
 
 
 if __name__ == "__main__":

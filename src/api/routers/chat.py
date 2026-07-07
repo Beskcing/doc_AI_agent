@@ -9,12 +9,14 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 
 from src.api.models import (
     ChatMessageInfo,
     ChatRequest,
     ChatResponse,
     ChatSessionInfo,
+    ChatStreamRequest,
     ContentEditRequest,
     CreateSessionRequest,
     ResponseModel,
@@ -294,7 +296,7 @@ async def chat_style(request: ChatRequest) -> ResponseModel:
                 msg["content"] = msg["content"].replace("{message}", request.message)
 
         # 6. 调用 LLM（多轮）
-        response_text = llm.invoke_messages(context_messages)
+        response_text = llm.invoke_messages(context_messages).content
         logger.debug("对话排版 LLM 响应: %s...", response_text[:200])
 
         # 7. 解析 JSON 响应
@@ -350,6 +352,32 @@ async def chat_style(request: ChatRequest) -> ResponseModel:
 
 
 # ────────── 对话内容编辑 ──────────
+
+
+@router.post("/stream")
+async def chat_stream(request: ChatStreamRequest):
+    """流式对话（SSE）
+
+    逐块返回 LLM 响应，供前端实时显示。
+    """
+    import json as json_mod
+
+    try:
+        llm = LLMClient(_config.llm)
+    except Exception as e:
+        logger.warning("LLM 初始化失败: %s", e)
+        return ResponseModel(code=500, message=f"LLM 不可用: {e}")
+
+    def event_generator():
+        try:
+            for chunk in llm.stream(request.message, request.system_prompt):
+                yield f"data: {json_mod.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+            yield f"data: {json_mod.dumps({'done': True})}\n\n"
+        except Exception as e:
+            logger.exception("流式对话失败")
+            yield f"data: {json_mod.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.post("/content", response_model=ResponseModel)

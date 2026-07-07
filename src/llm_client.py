@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Generator
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -17,6 +19,18 @@ from src.utils.json_validator import safe_parse_llm_json
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class LLMResponse:
+    """LLM 响应封装（含 token 计数）"""
+
+    content: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    provider: str = ""
+    model: str = ""
 
 
 class LLMClient:
@@ -53,17 +67,40 @@ class LLMClient:
             openai_api_base=prov_config.base_url,
             temperature=prov_config.temperature,
             max_tokens=prov_config.max_tokens,
+            # 指数退避重试 3 次 + 超时 60s
+            max_retries=3,
+            request_timeout=60,
         )
 
-    def invoke(self, prompt: str, system_prompt: str | None = None) -> str:
-        """调用 LLM 并返回文本响应
+    def _count_tokens(self, text: str) -> int:
+        """估算 token 数（中英文混合：字符数 / 1.5）"""
+        if not text:
+            return 0
+        return max(1, round(len(text) / 1.5))
+
+    def _build_response(self, content: str, prompt: str, system_prompt: str | None = None) -> LLMResponse:
+        """构建带 token 计数的 LLMResponse"""
+        input_text = prompt + (system_prompt or "")
+        input_tokens = self._count_tokens(input_text)
+        output_tokens = self._count_tokens(content)
+        return LLMResponse(
+            content=content,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+            provider=self.provider,
+            model=self.config.get_provider_config(self.provider).model,
+        )
+
+    def invoke(self, prompt: str, system_prompt: str | None = None) -> LLMResponse:
+        """调用 LLM 并返回带 token 计数的响应
 
         Args:
             prompt: 用户提示词
             system_prompt: 系统提示词（可选）
 
         Returns:
-            LLM 响应文本
+            LLMResponse 对象（访问 .content 获取文本）
         """
         messages = []
         if system_prompt:
@@ -73,9 +110,10 @@ class LLMClient:
         logger.debug("LLM 调用: provider=%s, prompt_len=%d", self.provider, len(prompt))
 
         response = self._chat_model.invoke(messages)
-        return response.content
+        content = response.content if isinstance(response.content, str) else str(response.content)
+        return self._build_response(content, prompt, system_prompt)
 
-    def invoke_messages(self, messages: list[dict]) -> str:
+    def invoke_messages(self, messages: list[dict]) -> LLMResponse:
         """多轮对话调用 LLM
 
         支持传入完整的消息列表，用于多轮对话场景。
@@ -84,7 +122,7 @@ class LLMClient:
             messages: 消息列表，每条消息为 {"role": "user"|"assistant"|"system", "content": "..."}
 
         Returns:
-            LLM 响应文本
+            LLMResponse 对象（访问 .content 获取文本）
         """
         lc_messages = []
         for msg in messages:
@@ -100,7 +138,31 @@ class LLMClient:
         logger.debug("LLM 多轮调用: provider=%s, messages_count=%d", self.provider, len(lc_messages))
 
         response = self._chat_model.invoke(lc_messages)
-        return response.content
+        content = response.content if isinstance(response.content, str) else str(response.content)
+        all_text = "".join(m.get("content", "") for m in messages)
+        return self._build_response(content, all_text)
+
+    def stream(self, prompt: str, system_prompt: str | None = None) -> Generator[str, None, None]:
+        """流式调用 LLM，逐块返回文本
+
+        Args:
+            prompt: 用户提示词
+            system_prompt: 系统提示词（可选）
+
+        Yields:
+            每次产出的文本块
+        """
+        messages = []
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
+        messages.append(HumanMessage(content=prompt))
+
+        logger.debug("LLM 流式调用: provider=%s, prompt_len=%d", self.provider, len(prompt))
+
+        for chunk in self._chat_model.stream(messages):
+            content = chunk.content
+            if isinstance(content, str) and content:
+                yield content
 
     def invoke_with_schema(
         self,
@@ -139,7 +201,8 @@ class LLMClient:
         last_error = None
         for attempt in range(max_retries + 1):
             try:
-                response_text = self.invoke(full_prompt, system_prompt)
+                llm_resp = self.invoke(full_prompt, system_prompt)
+                response_text = llm_resp.content
                 logger.debug("LLM 响应 (尝试 %d/%d): %s...", attempt + 1, max_retries + 1, response_text[:100])
 
                 # 安全解析 JSON

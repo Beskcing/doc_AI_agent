@@ -173,7 +173,7 @@ def _analyze_intent(
     try:
         # LLM 意图分析
         prompt = intent_prompt.replace("{markdown_content}", raw_markdown[:3000])
-        response = llm_client.invoke(prompt, system_prompt)
+        response = llm_client.invoke(prompt, system_prompt).content
 
         # 解析 LLM 输出
         try:
@@ -282,7 +282,7 @@ def _extract_style(
         except Exception:
             prompt = prompt.replace("{few_shot_examples}", "暂无历史调整记录。")
 
-        response = llm_client.invoke(prompt, system_prompt)
+        response = llm_client.invoke(prompt, system_prompt).content
 
         # 解析 JSON
         json_data = safe_parse_llm_json(response)
