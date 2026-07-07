@@ -165,6 +165,7 @@ const TaskDetailPage: React.FC = () => {
   const [contentLoading, setContentLoading] = useState(false)
   const [contentSaving, setContentSaving] = useState(false)
   const [contentLoaded, setContentLoaded] = useState(false)
+  const [htmlContentLoaded, setHtmlContentLoaded] = useState(false)
 
   // PDF 对比预览（分页加载）
   const [pdfPages, setPdfPages] = useState<Array<{ page: number; image: string; width: number; height: number }>>([])
@@ -789,12 +790,12 @@ const TaskDetailPage: React.FC = () => {
                     type={contentEditMode === 'richtext' ? 'primary' : 'default'}
                     onClick={async () => {
                       setContentEditMode('richtext')
-                      if (!contentLoaded) {
+                      if (!htmlContentLoaded) {
                         setContentLoading(true)
                         try {
                           const res = await getTaskContentHtml(taskId!)
                           setEditorHtml(res.data.data?.html || '')
-                          setContentLoaded(true)
+                          setHtmlContentLoaded(true)
                         } catch (err) {
                           message.error('加载内容失败')
                         } finally {
@@ -822,6 +823,7 @@ const TaskDetailPage: React.FC = () => {
                         )
                         fetchTask()
                         setContentLoaded(false)
+                        setHtmlContentLoaded(false)
                       } catch (err) {
                         message.error(err instanceof Error ? err.message : '保存失败')
                       } finally {
