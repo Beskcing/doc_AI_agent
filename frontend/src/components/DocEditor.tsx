@@ -78,7 +78,16 @@ export default function DocEditor({ initialHtml, onChange, disabled, onEditorIni
           '微软雅黑=微软雅黑,Microsoft YaHei;' +
           'Arial=arial,helvetica,sans-serif;' +
           'Times New Roman=times new roman,times',
-        fontsize_formats: '初号=42pt 小初=36pt 一号=26pt 小一=24pt 二号=22pt 小二=18pt 三号=16pt 小三=15pt 四号=14pt 小四=12pt 五号=10.5pt 小五=9pt 六号=7.5pt 小六=6.5pt 七号=5.5pt 八号=5pt',
+        fontsize_formats: [
+          { title: '初号', value: '42pt' }, { title: '小初', value: '36pt' },
+          { title: '一号', value: '26pt' }, { title: '小一', value: '24pt' },
+          { title: '二号', value: '22pt' }, { title: '小二', value: '18pt' },
+          { title: '三号', value: '16pt' }, { title: '小三', value: '15pt' },
+          { title: '四号', value: '14pt' }, { title: '小四', value: '12pt' },
+          { title: '五号', value: '10.5pt' }, { title: '小五', value: '9pt' },
+          { title: '六号', value: '7.5pt' }, { title: '小六', value: '6.5pt' },
+          { title: '七号', value: '5.5pt' }, { title: '八号', value: '5pt' },
+        ],
         style_formats: [
           { title: '正文', format: 'p' },
           { title: '一级标题', format: 'h1' },
