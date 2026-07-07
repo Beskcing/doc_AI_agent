@@ -311,16 +311,13 @@ async def preview_result(task_id: str) -> ResponseModel:
         if cleaned_md_path.exists():
             markdown_preview = cleaned_md_path.read_text(encoding="utf-8")
             # 同步更新数据库（BUG 修复：移除不必要的 update_status 空操作调用）
-            from src.db.database import SessionLocal
-            db = SessionLocal()
-            try:
+            from src.db.session import get_db_session
+            with get_db_session() as db:
                 from src.db.crud import TaskCRUD
                 t = TaskCRUD.get(db, task_id)
                 if t:
                     t.cleaned_markdown_preview = markdown_preview
                     db.commit()
-            finally:
-                db.close()
 
     return ResponseModel(
         data={
@@ -413,16 +410,13 @@ async def apply_template_to_task(task_id: str, request: ApplyTemplateRequest) ->
         if request.template_id:
             # 从 DB 获取模板
             from src.db.crud import StyleTemplateCRUD
-            from src.db.database import SessionLocal
+            from src.db.session import get_db_session
 
-            db = SessionLocal()
-            try:
+            with get_db_session() as db:
                 template = StyleTemplateCRUD.get(db, request.template_id)
                 if not template:
                     return ResponseModel(code=404, message="模板不存在")
                 style_config = template.style_config
-            finally:
-                db.close()
         elif request.style_config:
             style_config = request.style_config
         else:
@@ -485,10 +479,9 @@ async def save_style_to_template(task_id: str, request: SaveStyleToTemplateReque
     """
     try:
         from src.db.crud import StyleTemplateCRUD
-        from src.db.database import SessionLocal
+        from src.db.session import get_db_session
 
-        db = SessionLocal()
-        try:
+        with get_db_session() as db:
             if request.template_id:
                 # 更新已有模板
                 template = StyleTemplateCRUD.update(
@@ -514,8 +507,6 @@ async def save_style_to_template(task_id: str, request: SaveStyleToTemplateReque
                 "template_id": template.id,
                 "template_name": template.name,
             })
-        finally:
-            db.close()
     except Exception as e:
         logger.exception("保存样式到模板失败")
         return ResponseModel(code=500, message=f"保存失败: {e}")
@@ -526,10 +517,9 @@ async def get_style_history(task_id: str) -> ResponseModel:
     """获取任务的样式调整历史（功能4：迭代学习）"""
     try:
         from src.db.crud import StyleAdjustmentHistoryCRUD
-        from src.db.database import SessionLocal
+        from src.db.session import get_db_session
 
-        db = SessionLocal()
-        try:
+        with get_db_session() as db:
             records = StyleAdjustmentHistoryCRUD.list_by_task(db, task_id)
             return ResponseModel(data={
                 "items": [
@@ -547,8 +537,6 @@ async def get_style_history(task_id: str) -> ResponseModel:
                 ],
                 "total": len(records),
             })
-        finally:
-            db.close()
     except Exception as e:
         logger.exception("获取样式调整历史失败")
         return ResponseModel(code=500, message=f"获取历史失败: {e}")

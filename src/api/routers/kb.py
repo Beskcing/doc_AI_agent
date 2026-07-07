@@ -10,7 +10,7 @@ from fastapi import APIRouter, File, Query, UploadFile
 
 from src.api.models import KbListResponse, KbSearchRequest, ResponseModel
 from src.db.crud import KbDocumentCRUD
-from src.db.database import SessionLocal
+from src.db.session import get_db_session
 from src.utils.file_utils import ensure_dir
 from src.utils.logger import get_logger
 
@@ -28,8 +28,7 @@ async def list_kb_documents(
 ) -> ResponseModel:
     """获取知识库文档列表"""
     try:
-        db = SessionLocal()
-        try:
+        with get_db_session() as db:
             docs, total = KbDocumentCRUD.list_documents(db, page=page, page_size=page_size)
             items = []
             for doc in docs:
@@ -50,8 +49,6 @@ async def list_kb_documents(
                     items=items,
                 ),
             )
-        finally:
-            db.close()
     except Exception as e:
         logger.exception("获取知识库文档列表失败")
         return ResponseModel(code=500, message=f"获取知识库文档列表失败: {e}")
@@ -74,8 +71,7 @@ async def upload_kb_document(file: UploadFile = File(...)) -> ResponseModel:
         with open(file_path, "wb") as f:
             f.write(contents)
 
-        db = SessionLocal()
-        try:
+        with get_db_session() as db:
             # BUG 修复：上传时状态为 pending，需重建索引后才会变为 indexed
             doc = KbDocumentCRUD.create(
                 db,
@@ -84,8 +80,6 @@ async def upload_kb_document(file: UploadFile = File(...)) -> ResponseModel:
                 status="pending",
             )
             return ResponseModel(data={"uploaded": str(file_path), "name": doc.name, "id": doc.id, "status": "pending"})
-        finally:
-            db.close()
     except Exception as e:
         logger.exception("上传知识库文档失败")
         return ResponseModel(code=500, message=f"上传失败: {e}")
@@ -98,8 +92,7 @@ async def delete_kb_document(doc_id: str) -> ResponseModel:
     Bug#3 修复：同时删除物理文件，避免残留。
     """
     try:
-        db = SessionLocal()
-        try:
+        with get_db_session() as db:
             # 先获取文档记录以拿到文件路径
             doc = KbDocumentCRUD.get(db, doc_id)
             if not doc:
@@ -119,8 +112,6 @@ async def delete_kb_document(doc_id: str) -> ResponseModel:
             if success:
                 return ResponseModel(data={"deleted": doc_id})
             return ResponseModel(code=404, message="文档不存在")
-        finally:
-            db.close()
     except Exception as e:
         logger.exception("删除知识库文档失败")
         return ResponseModel(code=500, message=f"删除失败: {e}")
@@ -145,8 +136,7 @@ async def rebuild_kb_index() -> ResponseModel:
         doc_count = len(retriever.documents) if hasattr(retriever, "documents") else 0
 
         # 同步 DB 记录：确保 raw_docs 中的文件都有 DB 记录，并更新 chunk_count
-        db = SessionLocal()
-        try:
+        with get_db_session() as db:
             from src.db.models import KbDocumentModel
             raw_dir = Path(config.paths.raw_docs_dir)
             if raw_dir.exists():
@@ -179,8 +169,6 @@ async def rebuild_kb_index() -> ResponseModel:
                         existing.chunk_count = chunk_count
                         existing.status = "indexed"
                 db.commit()
-        finally:
-            db.close()
 
         logger.info("知识库重建完成: %d 个文档片段", doc_count)
         return ResponseModel(data={
@@ -200,8 +188,7 @@ async def get_kb_stats() -> ResponseModel:
     返回文档总数、已索引数、待索引数、总 chunk 数等。
     """
     try:
-        db = SessionLocal()
-        try:
+        with get_db_session() as db:
             from src.db.models import KbDocumentModel
 
             total_docs = db.query(KbDocumentModel).count()
@@ -222,8 +209,6 @@ async def get_kb_stats() -> ResponseModel:
                 "pending_docs": pending_docs,
                 "total_chunks": total_chunks,
             })
-        finally:
-            db.close()
     except Exception as e:
         logger.exception("获取知识库统计失败")
         return ResponseModel(code=500, message=f"获取统计失败: {e}")

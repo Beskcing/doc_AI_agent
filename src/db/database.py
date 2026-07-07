@@ -41,5 +41,19 @@ def get_db() -> Session:
 
 
 def init_db() -> None:
-    """初始化数据库（创建所有表）"""
+    """初始化数据库（优先使用 Alembic 迁移，降级回 create_all）"""
+    try:
+        from alembic import command
+        from alembic.config import Config as AlembicConfig
+
+        alembic_cfg_path = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
+        if alembic_cfg_path.exists():
+            alembic_cfg = AlembicConfig(str(alembic_cfg_path))
+            command.upgrade(alembic_cfg, "head")
+            return
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Alembic 迁移失败，降级为 create_all: %s", e)
+
+    # 降级：直接创建所有表
     Base.metadata.create_all(bind=engine)

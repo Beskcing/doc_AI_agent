@@ -136,12 +136,16 @@ class AppConfig(BaseModel):
 
         if not config_path.exists():
             # 使用默认配置
-            return cls._create_default()
+            instance = cls._create_default()
+            instance._validate_required()
+            return instance
 
         with open(config_path, "r", encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
 
-        return cls._from_raw(raw)
+        instance = cls._from_raw(raw)
+        instance._validate_required()
+        return instance
 
     @classmethod
     def _create_default(cls) -> AppConfig:
@@ -190,3 +194,15 @@ class AppConfig(BaseModel):
             pandoc=PandocConfig(**raw.get("pandoc", {})),
             mineru=MinerUConfig(**raw.get("mineru", {})),
         )
+
+    def _validate_required(self) -> None:
+        """校验必要配置是否完整"""
+        errors = []
+        if not self.llm.default_provider:
+            errors.append("llm.default_provider 未设置")
+        if not self.llm.providers:
+            errors.append("llm.providers 未配置任何 Provider")
+        if not self.paths.output_dir:
+            errors.append("paths.output_dir 未设置")
+        if errors:
+            raise ValueError(f"配置校验失败: {'; '.join(errors)}")

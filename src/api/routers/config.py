@@ -6,7 +6,7 @@ from fastapi import APIRouter
 
 from src.api.models import ResponseModel, SystemConfig, UpdateConfigRequest
 from src.db.crud import SystemConfigCRUD
-from src.db.database import SessionLocal
+from src.db.session import get_db_session
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -32,23 +32,17 @@ def _config_to_dict(config) -> dict:
 @router.get("", response_model=ResponseModel)
 async def get_config() -> ResponseModel:
     """获取系统配置"""
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         config = SystemConfigCRUD.get_or_create(db)
         return ResponseModel(data=_config_to_dict(config))
-    finally:
-        db.close()
 
 
 @router.put("", response_model=ResponseModel)
 async def update_config(request: UpdateConfigRequest) -> ResponseModel:
     """更新系统配置"""
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         config = SystemConfigCRUD.update(db, **request.model_dump(exclude_none=True))
         return ResponseModel(data=_config_to_dict(config))
-    finally:
-        db.close()
 
 
 @router.get("/supported-standards", response_model=ResponseModel)

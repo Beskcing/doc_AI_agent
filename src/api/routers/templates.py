@@ -16,7 +16,7 @@ from src.api.models import (
     UpdateTemplateRequest,
 )
 from src.db.crud import StyleTemplateCRUD
-from src.db.database import SessionLocal
+from src.db.session import get_db_session
 from src.utils.file_utils import ensure_dir
 from src.utils.logger import get_logger
 
@@ -85,22 +85,20 @@ async def upload_template(file: UploadFile = File(...)) -> ResponseModel:
 @router.post("", response_model=ResponseModel)
 async def save_template(request: SaveTemplateRequest) -> ResponseModel:
     """保存样式模板"""
-    db = SessionLocal()
-    try:
-        template = StyleTemplateCRUD.create(
-            db,
-            name=request.name,
-            style_config=request.style_config,
-            description=request.description,
-            source_docx_path=request.source_docx_path,
-        )
-        logger.info("样式模板已保存: %s (%s)", template.name, template.id)
-        return ResponseModel(data=_template_to_info(template).model_dump())
-    except Exception as e:
-        logger.exception("保存模板失败")
-        return ResponseModel(code=500, message=f"保存模板失败: {e}")
-    finally:
-        db.close()
+    with get_db_session() as db:
+        try:
+            template = StyleTemplateCRUD.create(
+                db,
+                name=request.name,
+                style_config=request.style_config,
+                description=request.description,
+                source_docx_path=request.source_docx_path,
+            )
+            logger.info("样式模板已保存: %s (%s)", template.name, template.id)
+            return ResponseModel(data=_template_to_info(template).model_dump())
+        except Exception as e:
+            logger.exception("保存模板失败")
+            return ResponseModel(code=500, message=f"保存模板失败: {e}")
 
 
 @router.get("", response_model=ResponseModel)
@@ -109,8 +107,7 @@ async def list_templates(
     page_size: int = 50,
 ) -> ResponseModel:
     """获取样式模板列表"""
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         templates, total = StyleTemplateCRUD.list_templates(db, page=page, page_size=page_size)
         return ResponseModel(data=StyleTemplateListResponse(
             total=total,
@@ -118,51 +115,41 @@ async def list_templates(
             page_size=page_size,
             items=[_template_to_info(t) for t in templates],
         ))
-    finally:
-        db.close()
 
 
 @router.get("/{template_id}", response_model=ResponseModel)
 async def get_template(template_id: str) -> ResponseModel:
     """获取模板详情"""
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         template = StyleTemplateCRUD.get(db, template_id)
         if not template:
             return ResponseModel(code=404, message="模板不存在")
         return ResponseModel(data=_template_to_info(template).model_dump())
-    finally:
-        db.close()
 
 
 @router.put("/{template_id}", response_model=ResponseModel)
 async def update_template(template_id: str, request: UpdateTemplateRequest) -> ResponseModel:
     """更新模板"""
-    db = SessionLocal()
-    try:
-        template = StyleTemplateCRUD.update(
-            db, template_id,
-            name=request.name,
-            style_config=request.style_config,
-            description=request.description,
-        )
-        if not template:
-            return ResponseModel(code=404, message="模板不存在")
-        return ResponseModel(data=_template_to_info(template).model_dump())
-    except Exception as e:
-        logger.exception("更新模板失败")
-        return ResponseModel(code=500, message=f"更新模板失败: {e}")
-    finally:
-        db.close()
+    with get_db_session() as db:
+        try:
+            template = StyleTemplateCRUD.update(
+                db, template_id,
+                name=request.name,
+                style_config=request.style_config,
+                description=request.description,
+            )
+            if not template:
+                return ResponseModel(code=404, message="模板不存在")
+            return ResponseModel(data=_template_to_info(template).model_dump())
+        except Exception as e:
+            logger.exception("更新模板失败")
+            return ResponseModel(code=500, message=f"更新模板失败: {e}")
 
 
 @router.delete("/{template_id}", response_model=ResponseModel)
 async def delete_template(template_id: str) -> ResponseModel:
     """删除模板"""
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         if StyleTemplateCRUD.delete(db, template_id):
             return ResponseModel(data={"deleted": True})
         return ResponseModel(code=404, message="模板不存在")
-    finally:
-        db.close()

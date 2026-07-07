@@ -23,7 +23,7 @@ from src.api.models import (
 )
 from src.config import AppConfig
 from src.db.crud import ChatMessageCRUD, ChatSessionCRUD
-from src.db.database import SessionLocal
+from src.db.session import get_db_session
 from src.llm_client import LLMClient
 from src.utils.json_validator import safe_parse_llm_json
 from src.utils.logger import get_logger
@@ -114,8 +114,7 @@ def _build_context_messages(
 @router.get("/sessions", response_model=ResponseModel)
 async def list_sessions(page: int = 1, page_size: int = 50) -> ResponseModel:
     """获取会话列表"""
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         sessions, total = ChatSessionCRUD.list_sessions(db, page, page_size)
         items = []
         for s in sessions:
@@ -133,15 +132,12 @@ async def list_sessions(page: int = 1, page_size: int = 50) -> ResponseModel:
         return ResponseModel(
             data={"total": total, "page": page, "page_size": page_size, "items": [i.model_dump() for i in items]}
         )
-    finally:
-        db.close()
 
 
 @router.post("/sessions", response_model=ResponseModel)
 async def create_session(request: CreateSessionRequest) -> ResponseModel:
     """创建新会话"""
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         session = ChatSessionCRUD.create(db, title=request.title, style_config=request.style_config)
         return ResponseModel(
             data=ChatSessionInfo(
@@ -153,15 +149,12 @@ async def create_session(request: CreateSessionRequest) -> ResponseModel:
                 updated_at=session.updated_at,
             ).model_dump()
         )
-    finally:
-        db.close()
 
 
 @router.get("/sessions/{session_id}", response_model=ResponseModel)
 async def get_session(session_id: str) -> ResponseModel:
     """获取会话详情（含消息列表）"""
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         session = ChatSessionCRUD.get(db, session_id)
         if not session:
             return ResponseModel(code=404, message="会话不存在")
@@ -192,28 +185,22 @@ async def get_session(session_id: str) -> ResponseModel:
                 "messages": msg_items,
             }
         )
-    finally:
-        db.close()
 
 
 @router.delete("/sessions/{session_id}", response_model=ResponseModel)
 async def delete_session(session_id: str) -> ResponseModel:
     """删除会话"""
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         success = ChatSessionCRUD.delete(db, session_id)
         if success:
             return ResponseModel(data={"deleted": session_id})
         return ResponseModel(code=404, message="会话不存在")
-    finally:
-        db.close()
 
 
 @router.get("/sessions/{session_id}/messages", response_model=ResponseModel)
 async def get_messages(session_id: str) -> ResponseModel:
     """获取会话的消息列表"""
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         messages = ChatMessageCRUD.list_messages(db, session_id)
         items = [
             ChatMessageInfo(
@@ -227,8 +214,6 @@ async def get_messages(session_id: str) -> ResponseModel:
             for m in messages
         ]
         return ResponseModel(data={"items": items})
-    finally:
-        db.close()
 
 
 # ────────── 对话（多轮） ──────────
@@ -254,101 +239,99 @@ async def chat_style(request: ChatRequest) -> ResponseModel:
         return ResponseModel(code=500, message="对话提示词文件不存在")
     prompt_template = prompt_path.read_text(encoding="utf-8")
 
-    db = SessionLocal()
-    user_msg_id = None  # 记录刚保存的用户消息 ID，异常时回滚
-    auto_created_session = False  # 是否在本请求中自动创建了会话
-    try:
-        # 1. 获取或创建会话
-        session_id = request.session_id
-        if session_id:
-            session = ChatSessionCRUD.get(db, session_id)
-            if not session:
-                return ResponseModel(code=404, message="会话不存在")
-        else:
-            # 自动创建新会话
-            session = ChatSessionCRUD.create(
-                db,
-                title=request.message[:20] + "..." if len(request.message) > 20 else request.message,
-                style_config=request.current_style_config,
+    with get_db_session() as db:
+        user_msg_id = None  # 记录刚保存的用户消息 ID，异常时回滚
+        auto_created_session = False  # 是否在本请求中自动创建了会话
+        try:
+            # 1. 获取或创建会话
+            session_id = request.session_id
+            if session_id:
+                session = ChatSessionCRUD.get(db, session_id)
+                if not session:
+                    return ResponseModel(code=404, message="会话不存在")
+            else:
+                # 自动创建新会话
+                session = ChatSessionCRUD.create(
+                    db,
+                    title=request.message[:20] + "..." if len(request.message) > 20 else request.message,
+                    style_config=request.current_style_config,
+                )
+                session_id = session.id
+                auto_created_session = True
+
+            # 2. 保存用户消息（记录 ID 用于异常回滚）
+            user_msg = ChatMessageCRUD.create(db, session_id=session_id, role="user", content=request.message)
+            user_msg_id = user_msg.id
+
+            # 3. 获取历史消息（用于上下文窗口）
+            db_messages = ChatMessageCRUD.list_messages(db, session_id)
+            history = [{"role": m.role, "content": m.content} for m in db_messages]
+
+            # 4. 构建上下文窗口消息
+            context_messages = _build_context_messages(
+                history_messages=history,
+                current_style_config=request.current_style_config,
+                prompt_template=prompt_template,
             )
-            session_id = session.id
-            auto_created_session = True
 
-        # 2. 保存用户消息（记录 ID 用于异常回滚）
-        user_msg = ChatMessageCRUD.create(db, session_id=session_id, role="user", content=request.message)
-        user_msg_id = user_msg.id
+            # 5. 替换最后一条 user 消息中的占位符（用户指令）
+            # 系统提示词中的 {message} 需要替换为当前用户消息
+            for msg in context_messages:
+                if msg["role"] == "system" and "{message}" in msg["content"]:
+                    msg["content"] = msg["content"].replace("{message}", request.message)
 
-        # 3. 获取历史消息（用于上下文窗口）
-        db_messages = ChatMessageCRUD.list_messages(db, session_id)
-        history = [{"role": m.role, "content": m.content} for m in db_messages]
+            # 6. 调用 LLM（多轮）
+            response_text = llm.invoke_messages(context_messages).content
+            logger.debug("对话排版 LLM 响应: %s...", response_text[:200])
 
-        # 4. 构建上下文窗口消息
-        context_messages = _build_context_messages(
-            history_messages=history,
-            current_style_config=request.current_style_config,
-            prompt_template=prompt_template,
-        )
+            # 7. 解析 JSON 响应
+            result = safe_parse_llm_json(response_text)
+            reply = result.get("reply", "已修改样式配置")
+            updated_config = result.get("style_config", request.current_style_config)
 
-        # 5. 替换最后一条 user 消息中的占位符（用户指令）
-        # 系统提示词中的 {message} 需要替换为当前用户消息
-        for msg in context_messages:
-            if msg["role"] == "system" and "{message}" in msg["content"]:
-                msg["content"] = msg["content"].replace("{message}", request.message)
-
-        # 6. 调用 LLM（多轮）
-        response_text = llm.invoke_messages(context_messages).content
-        logger.debug("对话排版 LLM 响应: %s...", response_text[:200])
-
-        # 7. 解析 JSON 响应
-        result = safe_parse_llm_json(response_text)
-        reply = result.get("reply", "已修改样式配置")
-        updated_config = result.get("style_config", request.current_style_config)
-
-        # 8. 保存 AI 回复消息（带样式快照）
-        ChatMessageCRUD.create(
-            db,
-            session_id=session_id,
-            role="assistant",
-            content=reply,
-            style_config_snapshot=updated_config,
-        )
-
-        # 9. 更新会话的样式配置
-        ChatSessionCRUD.update_style_config(db, session_id, updated_config)
-
-        # 10. 如果是第一条消息，用消息内容更新会话标题
-        msg_count = ChatMessageCRUD.count_messages(db, session_id)
-        if msg_count <= 2:
-            title = request.message[:30] + "..." if len(request.message) > 30 else request.message
-            ChatSessionCRUD.update_title(db, session_id, title)
-
-        logger.info("对话排版成功: session=%s, reply=%s...", session_id, reply[:50])
-        return ResponseModel(
-            data=ChatResponse(
-                reply=reply,
-                updated_style_config=updated_config,
+            # 8. 保存 AI 回复消息（带样式快照）
+            ChatMessageCRUD.create(
+                db,
                 session_id=session_id,
-            ).model_dump()
-        )
-    except Exception as e:
-        logger.exception("对话排版失败")
-        # 异常回滚：删除孤立用户消息以保持对话状态一致
-        if user_msg_id:
-            try:
-                ChatMessageCRUD.delete_message(db, user_msg_id)
-                logger.info("已回滚用户消息 %s", user_msg_id)
-            except Exception as cleanup_e:
-                logger.warning("回滚用户消息失败: %s", cleanup_e)
-        # 异常回滚：如果是自动创建的会话且尚无有效消息，删除空会话
-        if auto_created_session and session_id:
-            try:
-                ChatSessionCRUD.delete(db, session_id)
-                logger.info("已回滚自动创建的空会话 %s", session_id)
-            except Exception as cleanup_e:
-                logger.warning("回滚空会话失败: %s", cleanup_e)
-        return ResponseModel(code=500, message=f"对话排版失败: {e}")
-    finally:
-        db.close()
+                role="assistant",
+                content=reply,
+                style_config_snapshot=updated_config,
+            )
+
+            # 9. 更新会话的样式配置
+            ChatSessionCRUD.update_style_config(db, session_id, updated_config)
+
+            # 10. 如果是第一条消息，用消息内容更新会话标题
+            msg_count = ChatMessageCRUD.count_messages(db, session_id)
+            if msg_count <= 2:
+                title = request.message[:30] + "..." if len(request.message) > 30 else request.message
+                ChatSessionCRUD.update_title(db, session_id, title)
+
+            logger.info("对话排版成功: session=%s, reply=%s...", session_id, reply[:50])
+            return ResponseModel(
+                data=ChatResponse(
+                    reply=reply,
+                    updated_style_config=updated_config,
+                    session_id=session_id,
+                ).model_dump()
+            )
+        except Exception as e:
+            logger.exception("对话排版失败")
+            # 异常回滚：删除孤立用户消息以保持对话状态一致
+            if user_msg_id:
+                try:
+                    ChatMessageCRUD.delete_message(db, user_msg_id)
+                    logger.info("已回滚用户消息 %s", user_msg_id)
+                except Exception as cleanup_e:
+                    logger.warning("回滚用户消息失败: %s", cleanup_e)
+            # 异常回滚：如果是自动创建的会话且尚无有效消息，删除空会话
+            if auto_created_session and session_id:
+                try:
+                    ChatSessionCRUD.delete(db, session_id)
+                    logger.info("已回滚自动创建的空会话 %s", session_id)
+                except Exception as cleanup_e:
+                    logger.warning("回滚空会话失败: %s", cleanup_e)
+            return ResponseModel(code=500, message=f"对话排版失败: {e}")
 
 
 # ────────── 对话内容编辑 ──────────
