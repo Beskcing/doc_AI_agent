@@ -1,0 +1,33 @@
+services:
+  doc-ai-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: doc-ai-agent
+    ports:
+      - "8000:8000"
+    environment:
+      - MINERU_API_TOKEN=${MINERU_API_TOKEN}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - ZHIPUAI_API_KEY=${ZHIPUAI_API_KEY}
+    env_file:
+      - .env
+    volumes:
+      # 持久化数据目录
+      - data_volume:/app/data
+      - knowledge_data_volume:/app/knowledge_data
+      - logs_volume:/app/logs
+      # 挂载 .env 以支持运行时修改
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  data_volume:
+  knowledge_data_volume:
+  logs_volume:

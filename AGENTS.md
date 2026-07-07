@@ -6,6 +6,7 @@
 LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/python-docx (渲染) + FastAPI (API) + React/Ant Design (前端) + SQLite/SQLAlchemy (DB) + Chroma (RAG向量库)
 
 ## 启动方式
+- Docker 部署：`docker compose up -d`（构建并启动前后端）
 - 后端 API：`python -m scripts.run_server --port 8000`
 - 前端开发：`cd frontend && npm run dev`
 - CLI 管线：`python -m scripts.run_pipeline --input doc.pdf --output output.docx`
@@ -46,7 +47,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-07 | refactor | 工程化P1: 路由层22处SessionLocal清理为get_db_session+配置校验+Alembic迁移初始化 |
 | 2026-07-07 | feat | 工程化P2: Ruff lint全通过+pre-commit hooks+全局异常处理+Dockerfile |
 | 2026-07-07 | feat | 工程化P3: GitHub Actions CI+限流中间件+Makefile |
-| 2026-07-07 | test | 人工流程全面测试64项100%通过(test_human_workflow.py)，覆盖18个功能模块 |
+| 2026-07-07 | feat | Docker多阶段构建+前端编译+python:3.12-slim+pandoc+docker-compose一键启动+后端SPA静态文件挂载 |
 | 2026-07-07 | config | LLM Provider从Qwen切换为智谱AI(GLM-4)，默认模型glm-4 |
 | 2026-07-07 | fix | 对话LLM失败时自动回滚孤立用户消息，ChatMessageCRUD新增delete方法 |
 | 2026-07-07 | feat | html_to_pipe支持colspan/rowspan合并单元格 |

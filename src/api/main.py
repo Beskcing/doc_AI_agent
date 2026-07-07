@@ -8,10 +8,12 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.api.routers import chat_router, config_router, kb_router, tasks_router, templates_router, upload_router
 from src.db.database import init_db
@@ -79,6 +81,24 @@ app.include_router(kb_router)
 app.include_router(config_router)
 app.include_router(templates_router)
 app.include_router(chat_router)
+
+
+# 挂载前端静态文件（生产模式）
+_frontend_path = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if _frontend_path.exists():
+    assets_path = _frontend_path / "assets"
+    if assets_path.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="frontend-assets")
+
+    @app.get("/{full_path:path}")
+    async def _serve_frontend(full_path: str):
+        """SPA 前端路由回退"""
+        target = _frontend_path / full_path
+        if target.is_file():
+            return FileResponse(target)
+        return FileResponse(_frontend_path / "index.html")
+
+    logger.info("前端静态文件已挂载: %s", _frontend_path)
 
 
 # 全局异常处理
