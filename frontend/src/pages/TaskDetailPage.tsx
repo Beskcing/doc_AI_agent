@@ -486,6 +486,25 @@ const TaskDetailPage: React.FC = () => {
     requestAnimationFrame(() => { isSyncingRef.current = false })
   }, [syncScroll, contentEditMode])
 
+  // 自动加载：切换 tab 时自动加载对应内容
+  useEffect(() => {
+    if (!taskId || task?.status !== 'completed') return
+    if (activeTab === 'content_editor' && !contentLoaded) {
+      setContentLoading(true)
+      getTaskContent(taskId).then(res => {
+        setEditorMarkdown(res.data.data?.content || '')
+        setContentLoaded(true)
+      }).catch(() => {}).finally(() => setContentLoading(false))
+      if (!pdfLoaded) handleLoadPdfPages()
+    }
+    if (activeTab === 'mineru_docx' && !mineruDocxPreviewLoaded) {
+      setMineruDocxPreviewLoaded(true)
+    }
+    if (activeTab === 'markdown' && !preview) {
+      fetchPreview()
+    }
+  }, [activeTab, taskId, task?.status])
+
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 100 }}>
