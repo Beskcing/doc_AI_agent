@@ -43,7 +43,8 @@ LangChain/LangGraph (缂栨帓) + Qwen/GLM (LLM) + MinerU (PDF瑙ｆ瀽) + Pando
 
 | 鏃ユ湡 | 绫诲瀷 | 鎽樿 |
 |------|------|------|
-| 2026-07-07 | fix | TinyMCE toolbar按钮名称从fontsize改为fontsizeselect+空格分隔fontsize_formats格式显示中文字号
+| 2026-07-07 | fix | TinyMCE v8配置项名称修正: font_family_formats/font_size_formats/toolbar fontsize按钮(非fontsizeselect) |
+| 2026-07-07 | fix | TinyMCE toolbar按钮名称从fontsize改为fontsizeselect+空格分隔fontsize_formats格式显示中文字号 |
 | 2026-07-07 | fix | SPA fallback鎷︽埅API璺敱淇(main.py璺敱椤哄簭)+init_db绌鸿縼绉昏〃淇 |
 | 2026-07-07 | test | Loop Engineering Docker鍏ㄦ祴璇? API 59/62閫氳繃(95.2%)+鍓嶇7椤垫祻瑙堝櫒鑷姩鍖栧叏閫氳繃 |
 | 2026-07-07 | feat | 宸ョ▼鍖朠0: llm_client閲嶈瘯+瓒呮椂+LLMResponse token璁℃暟+娴佸紡杈撳嚭+CLI绠＄嚎鍚屾PipelineService |
