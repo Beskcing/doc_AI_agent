@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -49,6 +51,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 限流中间件（IP 级，100 请求/分钟）
+_rate_limit_store: dict[str, list[float]] = defaultdict(list)
+RATE_LIMIT = 100  # requests
+RATE_WINDOW = 60  # seconds
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """IP 级基本限流，防止恶意请求"""
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    window = _rate_limit_store[client_ip]
+    # 清理过期记录
+    _rate_limit_store[client_ip] = [t for t in window if now - t < RATE_WINDOW]
+    if len(_rate_limit_store[client_ip]) >= RATE_LIMIT:
+        return JSONResponse(status_code=429, content={"code": 429, "message": "请求过于频繁"})
+    _rate_limit_store[client_ip].append(now)
+    return await call_next(request)
+
 
 # 注册路由
 app.include_router(upload_router)
