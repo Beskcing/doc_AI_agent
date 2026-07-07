@@ -83,24 +83,6 @@ app.include_router(templates_router)
 app.include_router(chat_router)
 
 
-# 挂载前端静态文件（生产模式）
-_frontend_path = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
-if _frontend_path.exists():
-    assets_path = _frontend_path / "assets"
-    if assets_path.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="frontend-assets")
-
-    @app.get("/{full_path:path}")
-    async def _serve_frontend(full_path: str):
-        """SPA 前端路由回退"""
-        target = _frontend_path / full_path
-        if target.is_file():
-            return FileResponse(target)
-        return FileResponse(_frontend_path / "index.html")
-
-    logger.info("前端静态文件已挂载: %s", _frontend_path)
-
-
 # 全局异常处理
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -119,13 +101,35 @@ async def health_check() -> dict:
     return {"status": "ok", "version": "0.1.0"}
 
 
-# 根路径重定向到前端
-@app.get("/", tags=["根路径"])
-async def root() -> dict:
+# 根路径（有前端时服务前端，无前端时返回 API 信息）
+_frontend_path = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+
+@app.get("/", tags=["根路径"], response_model=None)
+async def root():
     """根路径"""
+    if _frontend_path.exists():
+        return FileResponse(_frontend_path / "index.html")
     return {
         "name": "文档排版智能体 API",
         "version": "0.1.0",
         "docs": "/api/docs",
         "health": "/api/health",
     }
+
+
+# 挂载前端静态文件（生产模式）—— 必须放在所有 API 路由之后，避免拦截 API 请求
+if _frontend_path.exists():
+    assets_path = _frontend_path / "assets"
+    if assets_path.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="frontend-assets")
+
+    @app.get("/{full_path:path}")
+    async def _serve_frontend(full_path: str):
+        """SPA 前端路由回退 —— 仅对未被 API 路由匹配的路径生效"""
+        target = _frontend_path / full_path
+        if target.is_file():
+            return FileResponse(target)
+        return FileResponse(_frontend_path / "index.html")
+
+    logger.info("前端静态文件已挂载: %s", _frontend_path)

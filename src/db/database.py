@@ -28,6 +28,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
     """SQLAlchemy 声明式基类"""
+
     pass
 
 
@@ -50,10 +51,28 @@ def init_db() -> None:
         if alembic_cfg_path.exists():
             alembic_cfg = AlembicConfig(str(alembic_cfg_path))
             command.upgrade(alembic_cfg, "head")
-            return
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).warning("Alembic 迁移失败，降级为 create_all: %s", e)
 
-    # 降级：直接创建所有表
-    Base.metadata.create_all(bind=engine)
+    # 检查核心表是否存在，不存在则 create_all
+    import logging
+
+    from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    existing_tables = inspector.get_table_names()
+    required_tables = {
+        "tasks",
+        "system_config",
+        "kb_documents",
+        "style_templates",
+        "chat_sessions",
+        "chat_messages",
+        "style_adjustment_history",
+    }
+    missing = required_tables - set(existing_tables)
+    if missing:
+        logging.getLogger(__name__).warning("缺少表 %s，执行 create_all", missing)
+        Base.metadata.create_all(bind=engine)
