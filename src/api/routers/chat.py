@@ -253,6 +253,8 @@ async def chat_style(request: ChatRequest) -> ResponseModel:
     prompt_template = prompt_path.read_text(encoding="utf-8")
 
     db = SessionLocal()
+    user_msg_id = None  # 记录刚保存的用户消息 ID，异常时回滚
+    auto_created_session = False  # 是否在本请求中自动创建了会话
     try:
         # 1. 获取或创建会话
         session_id = request.session_id
@@ -268,9 +270,11 @@ async def chat_style(request: ChatRequest) -> ResponseModel:
                 style_config=request.current_style_config,
             )
             session_id = session.id
+            auto_created_session = True
 
-        # 2. 保存用户消息
-        ChatMessageCRUD.create(db, session_id=session_id, role="user", content=request.message)
+        # 2. 保存用户消息（记录 ID 用于异常回滚）
+        user_msg = ChatMessageCRUD.create(db, session_id=session_id, role="user", content=request.message)
+        user_msg_id = user_msg.id
 
         # 3. 获取历史消息（用于上下文窗口）
         db_messages = ChatMessageCRUD.list_messages(db, session_id)
@@ -326,6 +330,20 @@ async def chat_style(request: ChatRequest) -> ResponseModel:
         )
     except Exception as e:
         logger.exception("对话排版失败")
+        # 异常回滚：删除孤立用户消息以保持对话状态一致
+        if user_msg_id:
+            try:
+                ChatMessageCRUD.delete_message(db, user_msg_id)
+                logger.info("已回滚用户消息 %s", user_msg_id)
+            except Exception as cleanup_e:
+                logger.warning("回滚用户消息失败: %s", cleanup_e)
+        # 异常回滚：如果是自动创建的会话且尚无有效消息，删除空会话
+        if auto_created_session and session_id:
+            try:
+                ChatSessionCRUD.delete(db, session_id)
+                logger.info("已回滚自动创建的空会话 %s", session_id)
+            except Exception as cleanup_e:
+                logger.warning("回滚空会话失败: %s", cleanup_e)
         return ResponseModel(code=500, message=f"对话排版失败: {e}")
     finally:
         db.close()

@@ -329,6 +329,23 @@ class ChatMessageCRUD:
     def count_messages(db: Session, session_id: str) -> int:
         return db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
 
+    @staticmethod
+    def delete_message(db: Session, message_id: str) -> bool:
+        """删除单条消息"""
+        msg = db.query(ChatMessageModel).filter(ChatMessageModel.id == message_id).first()
+        if msg:
+            db.delete(msg)
+            db.commit()
+            return True
+        return False
+
+    @staticmethod
+    def delete_by_session(db: Session, session_id: str) -> bool:
+        """删除会话下的所有消息"""
+        db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).delete()
+        db.commit()
+        return True
+
 
 class StyleAdjustmentHistoryCRUD:
     """样式调整历史 CRUD"""

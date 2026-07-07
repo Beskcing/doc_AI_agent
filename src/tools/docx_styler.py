@@ -139,6 +139,42 @@ class DocxStyler:
                 caption_style = self.config.caption_style or self.config.body_style
                 self._apply_paragraph_style(paragraph, caption_style)
                 paragraphs_styled += 1
+            elif role == "table_caption":
+                # 表格标题样式（表B.1/表1等），优先使用专用样式，回退到 caption 再到正文
+                tc_style = (
+                    self.config.table_caption_style
+                    or self.config.caption_style
+                    or self.config.body_style
+                )
+                self._apply_paragraph_style(paragraph, tc_style)
+                paragraphs_styled += 1
+            elif role == "preface":
+                # 前言/引言标题样式，回退到一级标题样式
+                preface_style = self.config.preface_style or self.config.get_heading_style(1)
+                if preface_style:
+                    self._apply_paragraph_style(paragraph, preface_style)
+                    headings_styled += 1
+                else:
+                    self._apply_paragraph_style(paragraph, self.config.body_style)
+            elif role == "appendix_title":
+                # 附录标题样式（加粗，区别于普通一级标题），回退到一级标题
+                app_style = self.config.appendix_title_style or self.config.get_heading_style(1)
+                if app_style:
+                    self._apply_paragraph_style(paragraph, app_style)
+                    headings_styled += 1
+                else:
+                    self._apply_paragraph_style(paragraph, self.config.body_style)
+            elif role.startswith("appendix_clause"):
+                # 附录内条款样式（A.1/B.1等），提取层级回退到对应标题样式
+                level_str = role.split("_")[-1]
+                clause_level = int(level_str) if level_str.isdigit() else 2
+                clause_style = (
+                    self.config.appendix_clause_style
+                    or self.config.get_heading_style(clause_level)
+                    or self.config.body_style
+                )
+                self._apply_paragraph_style(paragraph, clause_style)
+                headings_styled += 1
             elif role == "toc":
                 self._apply_paragraph_style(paragraph, self.config.body_style)
                 paragraphs_styled += 1
@@ -383,71 +419,61 @@ class DocxStyler:
     def _detect_paragraph_role(self, paragraph) -> str:
         """检测段落角色
 
-        基于 Pandoc 生成的 DOCX 内置样式名判断。
+        先基于 Pandoc 生成的 DOCX 内置样式名判断，
+        再使用内容模式识别作为后备方案（国标文档常按编号识别标题）。
 
         Args:
             paragraph: python-docx Paragraph 对象
 
         Returns:
-            角色字符串: heading_1..6 / body / list_item / toc / empty
+            角色字符串: heading_1..6 / body / list_item / toc / caption /
+            preface / appendix_title / appendix_clause_2..5 / table_caption / empty
         """
         style_name = paragraph.style.name if paragraph.style else ""
 
-        # 检查是否为标题
+        # 1. 先检查 Pandoc 样式名
         if style_name in HEADING_STYLE_MAP:
             level = HEADING_STYLE_MAP[style_name]
             return f"heading_{level}"
 
-        # 检查是否为列表项
         if "List" in style_name or "list" in style_name:
             return "list_item"
 
-        # 检查是否为目录
         if "TOC" in style_name or "toc" in style_name:
             return "toc"
 
-        # 检查是否为图表标题
         if "Caption" in style_name or "caption" in style_name:
             return "caption"
 
-        # 空段落
-        if not paragraph.text.strip():
+        # 2. 内容模式识别（后备方案：国标文档常按编号识别标题）
+        text = paragraph.text.strip()
+        if text:
+            from src.tools.content_pattern_matcher import classify_paragraph_role
+            role = classify_paragraph_role(text)
+            if role:
+                return role
+
+        # 3. 空段落
+        if not text:
             return "empty"
 
         return "body"
 
     def _ensure_font_installed(self, font_name: str) -> bool:
-        """检查系统字体是否可用
+        """检查字体是否在已知国标字体白名单中
 
         Args:
             font_name: 字体名称
 
         Returns:
-            是否可用（宽松检查，Windows 常见字体默认 True）
+            是否在白名单中（不在白名单的字体记录警告）
         """
-        # 常见国标字体白名单
         known_fonts = {
             "黑体", "宋体", "仿宋", "楷体", "微软雅黑",
             "仿宋_GB2312", "楷体_GB2312", "方正小标宋简体",
             "Times New Roman", "Arial", "Calibri",
         }
-        if font_name in known_fonts:
-            return True
-
-        # 尝试从系统字体目录检查（Windows）
-        try:
-            import ctypes
-            from ctypes import wintypes
-
-            user32 = ctypes.windll.user32
-            hdc = user32.GetDC(0)
-            gdi32 = ctypes.windll.gdi32
-            # 检查字体是否存在
-            result = gdi32.GetStockObject(0)  # 简单检查
-            return True  # 默认认为可用
-        except Exception:
-            # 非 Windows 系统或检查失败，默认返回 True
-            return True
+        return font_name in known_fonts
 
     def _set_cell_margins(self, cell, padding_pt: float) -> None:
         """设置表格单元格内边距（向后兼容）

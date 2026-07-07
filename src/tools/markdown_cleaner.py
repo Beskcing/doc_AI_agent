@@ -189,16 +189,13 @@ class MarkdownCleaner:
 
         total_len = len(markdown)
 
-        # 超长文档：跳过 LLM 审查，避免输出截断导致内容丢失
+        # 超长文档：启用分段 LLM 审查，而非直接跳过
         if total_len > self.LLM_REVIEW_MAX_CHARS:
-            logger.warning(
-                "文档过长 (%d 字符 > %d)，跳过 LLM 审查，仅使用规则预处理",
+            logger.info(
+                "文档较长 (%d 字符 > %d)，启用分段 LLM 审查",
                 total_len, self.LLM_REVIEW_MAX_CHARS,
             )
-            return CleaningResult(
-                cleaned_markdown=markdown,
-                changes_log=[f"文档过长（{total_len} 字符），跳过 LLM 审查"],
-            )
+            return self._llm_review_chunked(markdown, context)
 
         # 包含表格占位符时跳过 LLM 审查，避免 LLM 修改占位符导致表格恢复失败
         if "@@TABLE_PLACEHOLDER_" in markdown:
@@ -229,6 +226,107 @@ class MarkdownCleaner:
             logger.warning("LLM 审查失败，使用预处理结果: %s", e)
             return CleaningResult(cleaned_markdown=markdown)
 
+    # ==================== 分段 LLM 审查 ====================
+
+    def _split_by_sections(self, markdown: str, max_chunk_size: int = 12000) -> list[str]:
+        """按章节边界将 Markdown 分块
+
+        优先在标题行（# 开头）处分割，每个块不超过 max_chunk_size。
+
+        Args:
+            markdown: 待分块的 Markdown 文本
+            max_chunk_size: 单块最大字符数
+
+        Returns:
+            分块后的文本列表
+        """
+        lines = markdown.splitlines()
+        chunks: list[str] = []
+        current: list[str] = []
+        current_len = 0
+
+        for line in lines:
+            line_len = len(line) + 1  # +1 for newline
+            # 在标题行处分块（且当前块已有内容）
+            if line.strip().startswith("#") and current and current_len > max_chunk_size:
+                chunks.append("\n".join(current))
+                current = []
+                current_len = 0
+            current.append(line)
+            current_len += line_len
+
+        if current:
+            chunks.append("\n".join(current))
+
+        # 如果某个块仍然过大，按行硬切
+        final_chunks: list[str] = []
+        for chunk in chunks:
+            if len(chunk) > max_chunk_size * 1.5:
+                # 按行拼接直到接近 max_chunk_size
+                chunk_lines = chunk.splitlines()
+                sub: list[str] = []
+                sub_len = 0
+                for cl in chunk_lines:
+                    cl_len = len(cl) + 1
+                    if sub and sub_len + cl_len > max_chunk_size:
+                        final_chunks.append("\n".join(sub))
+                        sub = []
+                        sub_len = 0
+                    sub.append(cl)
+                    sub_len += cl_len
+                if sub:
+                    final_chunks.append("\n".join(sub))
+            else:
+                final_chunks.append(chunk)
+
+        return final_chunks
+
+    def _llm_review_chunked(self, markdown: str, context: IntentAnalysis) -> CleaningResult:
+        """分段 LLM 审查：按章节边界分块，逐块送 LLM 审查，最后合并"""
+        chunks = self._split_by_sections(markdown, max_chunk_size=12000)
+        reviewed_parts: list[str] = []
+        total_changes = 0
+        total_errors = 0
+
+        for i, chunk in enumerate(chunks):
+            # 包含表格占位符的块跳过 LLM 审查
+            if "@@TABLE_PLACEHOLDER_" in chunk:
+                reviewed_parts.append(chunk)
+                logger.info("分段审查 [%d/%d]: 跳过（含表格占位符）", i + 1, len(chunks))
+                continue
+            # 过短的块跳过
+            if len(chunk) < 50:
+                reviewed_parts.append(chunk)
+                continue
+
+            result = self._review_single_chunk(chunk, context)
+            reviewed_parts.append(result.cleaned_markdown)
+            total_changes += len(result.changes_log)
+            total_errors += result.ocr_errors_marked
+            logger.info("分段审查 [%d/%d]: %d 字符", i + 1, len(chunks), len(chunk))
+
+        return CleaningResult(
+            cleaned_markdown="\n".join(reviewed_parts),
+            changes_log=[f"分段LLM审查完成（{len(chunks)}段），{total_changes}处修改"],
+            ocr_errors_marked=total_errors,
+        )
+
+    def _review_single_chunk(self, chunk: str, context: IntentAnalysis) -> CleaningResult:
+        """审查单个文本块"""
+        prompt = self._build_review_prompt(chunk, context)
+        try:
+            response = self.llm_client.invoke(prompt)
+            cleaned = self._extract_cleaned_markdown(response)
+            marked_count = cleaned.count(self.OCR_ERROR_MARK)
+            return CleaningResult(
+                cleaned_markdown=cleaned,
+                changes_log=[f"LLM 审查完成（{len(chunk)} 字符），标记 {marked_count} 个需人工核对项"],
+                ocr_errors_marked=marked_count,
+            )
+        except Exception as e:
+            logger.warning("单块 LLM 审查失败: %s", e)
+            return CleaningResult(cleaned_markdown=chunk)
+
     # ==================== 规则化清洗方法 ====================
 
     def _fullwidth_to_halfwidth(self, text: str) -> tuple[str, int]:
@@ -250,22 +348,14 @@ class MarkdownCleaner:
             if 0xFF10 <= code <= 0xFF19 or 0xFF21 <= code <= 0xFF3A or 0xFF41 <= code <= 0xFF5A:
                 result.append(chr(code - 0xFEE0))
                 count += 1
-            # 全角标点
+            # 全角括号 () → 半角（代码中常见，保留转换）
             elif code == 0xFF08:  # （
                 result.append("(")
                 count += 1
             elif code == 0xFF09:  # ）
                 result.append(")")
                 count += 1
-            elif code == 0xFF0C:  # ，
-                result.append(",")
-                count += 1
-            elif code == 0xFF1A:  # ：
-                result.append(":")
-                count += 1
-            elif code == 0xFF1B:  # ；
-                result.append(";")
-                count += 1
+            # 全角标点（中文逗号、冒号、分号）保留不转换，国标文档要求全角标点
             else:
                 result.append(char)
         return "".join(result), count

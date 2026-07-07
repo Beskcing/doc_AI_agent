@@ -97,6 +97,7 @@ class PathsConfig(BaseModel):
 
     input_dir: str = "data/input"
     output_dir: str = "data/output"
+    uploads_dir: str = "data/uploads"
     knowledge_data_dir: str = "knowledge_data"
     raw_docs_dir: str = "knowledge_data/raw_docs"
     prompts_dir: str = "prompts"

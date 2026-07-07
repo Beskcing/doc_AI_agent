@@ -23,6 +23,14 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Cm, Emu, Pt
 
+from src.tools.content_pattern_matcher import (
+    APPENDIX_CLAUSE_PATTERNS,
+    APPENDIX_TITLE_PATTERN,
+    HEADING_PATTERNS,
+    SPECIAL_HEADING_PATTERNS,
+    TABLE_CAPTION_PATTERN,
+    classify_heading_level_by_content,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -391,48 +399,15 @@ class DocxStyleExtractor:
 
     # ==================== 内容模式识别 ====================
 
-    # 国标文档常见标题模式
-    _HEADING_PATTERNS: list[tuple[int, re.Pattern]] = [
-        # 五级: 4.4.4.1 xxx
-        (5, re.compile(r'^\d+\.\d+\.\d+\.\d+\.\d+\s+\S')),
-        # 四级: 4.4.4.1 xxx
-        (4, re.compile(r'^\d+\.\d+\.\d+\.\d+\s+\S')),
-        # 三级: 4.2.1 xxx
-        (3, re.compile(r'^\d+\.\d+\.\d+\s+\S')),
-        # 二级: 4.1 xxx
-        (2, re.compile(r'^\d+\.\d+\s+\S')),
-        # 一级: 1 范围 / 2 规范性引用文件
-        (1, re.compile(r'^\d+\s+\S')),
-    ]
-
-    # 特殊标题模式（一级）
-    _SPECIAL_HEADING_PATTERNS = [
-        re.compile(r'^前言$'),
-        re.compile(r'^引言$'),
-        re.compile(r'^第[一二三四五六七八九十]+\s*(法|部分|章|节)'),
-        re.compile(r'^参考文献$'),
-    ]
-
-    # 附录标题模式（独立于普通标题，因为附录标题加粗而普通一级标题不加粗）
-    _APPENDIX_TITLE_PATTERN = re.compile(r'^附录\s*[A-Z]')
-
-    # 附录内条款模式（A.1 / B.1 / B.2 等）
-    _APPENDIX_CLAUSE_PATTERNS: list[tuple[int, re.Pattern]] = [
-        # 五级: A.1.1.1.1 xxx
-        (5, re.compile(r'^[A-Z]\.\d+\.\d+\.\d+\.\d+\s+\S')),
-        # 四级: A.1.1.1 xxx
-        (4, re.compile(r'^[A-Z]\.\d+\.\d+\.\d+\s+\S')),
-        # 三级: A.1.1 xxx
-        (3, re.compile(r'^[A-Z]\.\d+\.\d+\s+\S')),
-        # 二级: A.1 xxx / B.1 xxx
-        (2, re.compile(r'^[A-Z]\.\d+\s+\S')),
-    ]
-
-    # 表格标题模式
-    _TABLE_CAPTION_PATTERN = re.compile(r'^表\s*[A-Z]?\.?\d+')
+    # 正则模式已提取到共享模块 content_pattern_matcher，此处引用以保持类内方法兼容
+    _HEADING_PATTERNS = HEADING_PATTERNS
+    _SPECIAL_HEADING_PATTERNS = SPECIAL_HEADING_PATTERNS
+    _APPENDIX_TITLE_PATTERN = APPENDIX_TITLE_PATTERN
+    _APPENDIX_CLAUSE_PATTERNS = APPENDIX_CLAUSE_PATTERNS
+    _TABLE_CAPTION_PATTERN = TABLE_CAPTION_PATTERN
 
     def _classify_heading_level_by_content(self, text: str) -> int | None:
-        """基于内容模式识别标题级别
+        """基于内容模式识别标题级别（委托共享模块）
 
         用于文档不使用标准 Heading 样式的后备方案。
         识别国标文档常见的条款编号格式。
@@ -445,27 +420,7 @@ class DocxStyleExtractor:
         Returns:
             标题级别 (1-5)，非标题返回 None
         """
-        # 附录标题和附录内条款不作为普通标题识别
-        if self._APPENDIX_TITLE_PATTERN.match(text):
-            return None
-        for _, pattern in self._APPENDIX_CLAUSE_PATTERNS:
-            if pattern.match(text):
-                return None
-        # 表格标题不作为普通标题
-        if self._TABLE_CAPTION_PATTERN.match(text):
-            return None
-
-        # 检查特殊标题
-        for pattern in self._SPECIAL_HEADING_PATTERNS:
-            if pattern.match(text):
-                return 1
-
-        # 检查编号格式（从高到低，避免误匹配）
-        for level, pattern in self._HEADING_PATTERNS:
-            if pattern.match(text):
-                return level
-
-        return None
+        return classify_heading_level_by_content(text)
 
     def _is_cover_or_preface(self, paragraph) -> str | None:
         """判断段落是否属于封面或前言区域
@@ -1216,46 +1171,6 @@ class DocxStyleExtractor:
         base.setdefault("keep_with_next", False)
         base.setdefault("widow_control", True)
         return base
-
-    # ==================== 图表标题样式 ====================
-
-    def _extract_caption_style(self, doc: Document, style_defs: dict) -> dict | None:
-        """提取图表标题样式"""
-        base = dict(style_defs.get("caption", {})) if "caption" in style_defs else None
-
-        # 从文档段落中找 Caption 样式的段落
-        caption_paragraphs = []
-        for paragraph in doc.paragraphs:
-            style_name = paragraph.style.name if paragraph.style else ""
-            if "Caption" in style_name or "caption" in style_name:
-                if paragraph.text.strip():
-                    caption_paragraphs.append(paragraph)
-
-        if not caption_paragraphs and not base:
-            return None
-
-        if not caption_paragraphs:
-            return base
-
-        sample = caption_paragraphs[: min(5, len(caption_paragraphs))]
-        font_configs = [self._extract_font_from_paragraph(p) for p in sample]
-        alignments = [self._extract_alignment(p) for p in sample]
-
-        result = dict(base) if base else {}
-        result["font"] = self._merge_font_configs(font_configs)
-        result["alignment"] = Counter(alignments).most_common(1)[0][0]
-        result.setdefault("line_spacing", 1.5)
-        result.setdefault("line_spacing_pt", None)
-        result.setdefault("line_spacing_rule", "multiple")
-        result.setdefault("space_before_pt", 0)
-        result.setdefault("space_after_pt", 0)
-        result.setdefault("first_line_indent_chars", 0)
-        result.setdefault("left_indent_cm", 0)
-        result.setdefault("right_indent_cm", 0)
-        result.setdefault("keep_together", False)
-        result.setdefault("keep_with_next", False)
-        result.setdefault("widow_control", True)
-        return result
 
     # ==================== 页眉页脚样式 ====================
 

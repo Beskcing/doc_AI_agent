@@ -269,6 +269,18 @@ def _extract_style(
         prompt = prompt.replace("{detected_standard}", intent.get("detected_standard", "GB/T 9704") or "GB/T 9704")
         prompt = prompt.replace("{special_elements}", "、".join(special) if special else "无特殊元素")
         prompt = prompt.replace("{rag_context}", rag_context)
+        # 注入 few-shot 示例
+        try:
+            from src.api.services.service_deps import ServiceDeps
+            deps = ServiceDeps(config)
+            from src.api.services.pipeline_service import PipelineService
+            pipeline = PipelineService(deps=deps, update_status=lambda *a, **kw: None)
+            few_shot = pipeline._get_few_shot_examples(
+                standard=intent.get("detected_standard"), limit=3
+            )
+            prompt = prompt.replace("{few_shot_examples}", few_shot)
+        except Exception:
+            prompt = prompt.replace("{few_shot_examples}", "暂无历史调整记录。")
 
         response = llm_client.invoke(prompt, system_prompt)
 
@@ -316,33 +328,39 @@ def _render_docx(
     pandoc_converter: PandocConverter,
     config: AppConfig,
 ) -> dict:
-    """节点 6: 文档渲染（Pandoc + python-docx）"""
+    """节点 6: 文档渲染（优先 MinerU DOCX，回退 Pandoc + python-docx）"""
     cleaned_md = state.get("cleaned_markdown", "")
     style_config = state.get("style_config", {})
     table_map = state.get("table_placeholder_map", {})
+    parsed_document = state.get("parsed_document", {})
     logger.info("[render_docx] 渲染 Word 文档...")
 
     output_dir = ensure_dir(Path(config.paths.output_dir))
-    intermediate_path = output_dir / "intermediate.docx"
     final_path = output_dir / "output.docx"
 
-    try:
-        # 恢复 HTML 表格
+    # 优先使用 MinerU 原始 DOCX 作为基础（保留原始排版）
+    mineru_docx_path = parsed_document.get("metadata", {}).get("mineru_docx_path")
+    if mineru_docx_path and Path(mineru_docx_path).exists():
+        docx_base_path = mineru_docx_path
+        logger.info("[render_docx] 使用 MinerU 原始 DOCX 作为样式基础: %s", docx_base_path)
+    else:
+        # 回退：Pandoc MD → DOCX
+        intermediate_path = output_dir / "intermediate.docx"
         table_preserver = HTMLTablePreserver()
         final_md = table_preserver.restore(cleaned_md, table_map)
-
-        # Pandoc 转换
         report = pandoc_converter.markdown_to_docx(final_md, str(intermediate_path))
         if not report.success:
             return {
                 "error": f"Pandoc 转换失败: {report.errors}",
                 "final_output_path": "",
             }
+        docx_base_path = str(intermediate_path)
 
+    try:
         # python-docx 样式渲染
         sc = StyleConfig.model_validate(style_config)
         styler = DocxStyler(sc)
-        style_report = styler.apply_gb_style(str(intermediate_path), str(final_path))
+        style_report = styler.apply_gb_style(docx_base_path, str(final_path))
 
         return {
             "intermediate_docx_path": str(intermediate_path),

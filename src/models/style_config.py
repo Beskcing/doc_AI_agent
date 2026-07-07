@@ -116,6 +116,22 @@ class StyleConfig(BaseModel):
     footnote_style: ParagraphStyleConfig | None = Field(default=None, description="脚注/尾注样式")
     caption_style: ParagraphStyleConfig | None = Field(default=None, description="图表标题样式")
     header_footer_style: ParagraphStyleConfig | None = Field(default=None, description="页眉页脚样式")
+    # 封面/前言/附录等特殊区域样式（由 docx_style_extractor 提取，docx_styler 应用）
+    cover_style: ParagraphStyleConfig | None = Field(
+        default=None, description="封面区域样式（大字号居中段落）"
+    )
+    preface_style: ParagraphStyleConfig | None = Field(
+        default=None, description="前言/引言标题样式"
+    )
+    appendix_title_style: ParagraphStyleConfig | None = Field(
+        default=None, description="附录标题样式（附录A/附录B等，通常加粗区别于普通一级标题）"
+    )
+    appendix_clause_style: ParagraphStyleConfig | None = Field(
+        default=None, description="附录内条款样式（A.1/B.1等）"
+    )
+    table_caption_style: ParagraphStyleConfig | None = Field(
+        default=None, description="表格标题样式（表B.1/表1等）"
+    )
     rag_sources: list[str] = Field(
         default_factory=list,
         description="RAG 检索到的规范文档来源列表，如 ['国标排版规范_v2.0_第3章']",

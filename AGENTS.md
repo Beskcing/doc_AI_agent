@@ -73,3 +73,11 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-06 | fix | Loop Engineering V5全面真实串联测试71项100%通过：修复Bug#1原始PDF预览响应过大(109页PDF一次性返回55.7MB base64图片导致浏览器崩溃→改为分页加载：后端get_pdf_page_images新增page/page_size参数默认5页/次、tasks.py端点支持Query参数、前端api.ts+TaskDetailPage实现增量加载+「加载更多」按钮，响应从55MB降到1MB，50倍缩减) |
 | 2026-07-06 | fix | Loop Engineering V6全面真实串联测试82项98.8%通过(1项瞬时网络超时非代码Bug)：新增test_loop_v6.py覆盖18个功能模块(健康检查/系统配置含持久化验证/文件上传含错误路径/任务生命周期含分页验证/全预览下载含DOCX重新生成验证/内容编辑含MD+HTML双模式/模板上传提取/模板CRUD含404错误路径/应用模板+样式调整历史/保存样式到模板/上传修正DOCX/多轮对话含消息快照验证/对话内容编辑/知识库完整生命周期含pending状态验证/任务管理取消重试删除/批量任务/清理)；测试框架新增_request_with_retry网络重试函数防止瞬时连接重置误报 |
 | 2026-07-06 | fix | Loop Engineering V5全面真实串联测试71项全部通过(100%)：修复Bug#1原始PDF预览响应过大(109页PDF一次性返回55.7MB base64图片导致浏览器崩溃→改为分页加载：后端get_pdf_page_images新增page/page_size参数默认5页/次、tasks.py端点新增Query分页参数返回total_pages、前端api.ts getOriginalPdfPages支持分页参数、TaskDetailPage新增「加载更多」按钮增量加载+显示已加载/总页数)；响应从55.7MB降至1MB(50倍缩减)；新增test_loop_v5.py覆盖18大功能模块71项测试(健康检查/配置/上传/任务生命周期/全预览含PDF分页/内容编辑MD+HTML/模板上传提取/模板CRUD/应用模板/直接style_config应用/样式历史/保存样式到模板新建+更新/上传修正DOCX/多轮对话排版/对话内容编辑/知识库完整生命周期/任务管理取消重试删除/批量任务) |
+| 2026-07-07 | refactor | TaskManager 门面模式拆分：新增 PipelineService/PreviewService/ContentEditService/ServiceDeps 4个服务文件+DB会话上下文管理器，task_manager从1742行缩减至300行；新增 content_pattern_matcher.py 共享模块，docx_style_extractor/docx_styler 统一调用 |
+| 2026-07-07 | feat | docx_styler 增强5种新角色处理（封面/前言/附录标题/附录条款/表格标题）+内容模式识别后备方案；StyleConfig模型新增5个字段 |
+| 2026-07-07 | fix | markdown_cleaner 超长文档启用分段LLM审查替代直接跳过；全角标点保留（中文逗号/冒号/分号不再转半角）|
+| 2026-07-07 | perf | hybrid_retriever _find_doc_index从O(n)遍历改为O(1)哈希索引 |
+| 2026-07-07 | feat | html_to_pipe HTMLTableExtractor 支持 colspan/rowspan 合并单元格 |
+| 2026-07-07 | fix | 对话消息状态不一致：LLM调用失败时自动回滚孤立用户消息，ChatMessageCRUD新增delete_message/delete_by_session方法 |
+| 2026-07-07 | config | LLM Provider从通义千问(Qwen)切换为智谱AI(GLM-4)，默认模型glm-4 |
+| 2026-07-07 | test | 新增test_human_workflow.py人工流程全面测试(64项100%通过)，覆盖18个功能模块：健康检查/配置/上传/任务生命周期/预览/下载/内容编辑/模板全流程/应用模板/save-style/修正DOCX/对话排版/对话内容/知识库/任务管理/批量操作/清理 |

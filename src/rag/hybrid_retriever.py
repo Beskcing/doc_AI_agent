@@ -59,6 +59,18 @@ class HybridRetriever:
         self._docs = chunked_docs
         self._bm25 = self._build_bm25_index(chunked_docs)
 
+        # 新增：构建内容哈希索引（O(1) 查找）
+        self._content_index: dict[str, int] = {}
+        self._metadata_index: dict[tuple, int] = {}
+        for idx, doc in enumerate(chunked_docs):
+            self._content_index[doc.page_content] = idx
+            meta_key = (
+                doc.metadata.get("source"),
+                doc.metadata.get("chunk_index"),
+            )
+            if meta_key[1] is not None:
+                self._metadata_index[meta_key] = idx
+
         logger.info(
             "混合检索器初始化: %d 个文档, BM25 权重=%.2f, 向量权重=%.2f",
             len(chunked_docs), bm25_weight, vector_weight,
@@ -245,7 +257,7 @@ class HybridRetriever:
         return [w for w in jieba.cut(text) if w.strip()]
 
     def _find_doc_index(self, doc: Document) -> int | None:
-        """通过文档内容或元数据查找索引
+        """通过文档内容或元数据查找索引（O(1) 哈希查找）
 
         Args:
             doc: Document 对象
@@ -253,14 +265,19 @@ class HybridRetriever:
         Returns:
             文档索引或 None
         """
+        # 1. 内容哈希查找
+        idx = self._content_index.get(doc.page_content)
+        if idx is not None:
+            return idx
+        # 2. 元数据查找
+        meta_key = (
+            doc.metadata.get("source"),
+            doc.metadata.get("chunk_index"),
+        )
+        if meta_key[1] is not None:
+            return self._metadata_index.get(meta_key)
+        # 3. 回退：遍历查找（用于无 chunk_index 的文档）
         for idx, d in enumerate(self._docs):
             if d.page_content == doc.page_content:
-                return idx
-            # 通过元数据匹配
-            if (
-                d.metadata.get("source") == doc.metadata.get("source")
-                and d.metadata.get("chunk_index") == doc.metadata.get("chunk_index")
-                and doc.metadata.get("chunk_index") is not None
-            ):
                 return idx
         return None

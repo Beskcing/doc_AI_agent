@@ -2,7 +2,7 @@
 # 所有路径相对于项目根目录
 
 llm:
-  default_provider: qwen
+  default_provider: glm
   providers:
     qwen:
       model: qwen-plus
