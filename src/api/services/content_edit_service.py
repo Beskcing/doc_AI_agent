@@ -9,8 +9,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from src.api.services.service_deps import ServiceDeps
 from src.db.session import get_db_session
@@ -46,8 +46,9 @@ class ContentEditService:
         self._apply_style = apply_style_fn
         self._convert_to_docx = convert_to_docx_fn
 
-    def update_content(self, task_id: str, content: str, content_type: str = "markdown",
-                       regenerate_docx: bool = True) -> dict:
+    def update_content(
+        self, task_id: str, content: str, content_type: str = "markdown", regenerate_docx: bool = True
+    ) -> dict:
         """更新任务的文档内容"""
         task = self._get_task(task_id)
         if not task:
@@ -118,7 +119,9 @@ class ContentEditService:
                 import pypandoc
 
                 html = pypandoc.convert_file(
-                    str(mineru_docx), "html", format="docx",
+                    str(mineru_docx),
+                    "html",
+                    format="docx",
                     extra_args=["--wrap=none", "--standalone", "--embed-resources"],
                 )
                 logger.info("任务 %s: MinerU DOCX→HTML 加载成功, %d 字符", task_id, len(html))
@@ -139,7 +142,9 @@ class ContentEditService:
             import pypandoc
 
             html = pypandoc.convert_text(
-                markdown_content, "html", format="markdown+raw_html+tex_math_dollars",
+                markdown_content,
+                "html",
+                format="markdown+raw_html+tex_math_dollars",
                 extra_args=["--standalone"],
             )
             return html
@@ -202,8 +207,12 @@ class ContentEditService:
                 task_db.result_path = styled_path
                 db.commit()
 
-        logger.info("任务 %s: LLM 内容修改完成 (mode=%s, content_len=%d)",
-                    task_id, "diff" if content_len > 10000 else "full", content_len)
+        logger.info(
+            "任务 %s: LLM 内容修改完成 (mode=%s, content_len=%d)",
+            task_id,
+            "diff" if content_len > 10000 else "full",
+            content_len,
+        )
         return {"reply": reply, "updated_markdown": updated_markdown, "task_id": task_id}
 
     def _html_to_markdown(self, html: str, task_id: str) -> str:
@@ -251,7 +260,11 @@ class ContentEditService:
         docx_path = result_dir / "formatted.docx"
 
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", encoding="utf-8", delete=False, dir=str(result_dir),
+            mode="w",
+            suffix=".html",
+            encoding="utf-8",
+            delete=False,
+            dir=str(result_dir),
         ) as tmp:
             tmp.write(html)
             html_tmp_path = tmp.name
@@ -279,8 +292,8 @@ class ContentEditService:
                 "## 当前文档内容\n\n{current_content}\n\n"
                 "## 用户修改指令\n\n{message}\n\n"
                 "## 输出格式\n\n请输出 JSON 格式：\n"
-                '- `reply`: 对修改内容的简要说明\n'
-                '- `markdown`: 修改后的完整 Markdown 内容\n'
+                "- `reply`: 对修改内容的简要说明\n"
+                "- `markdown`: 修改后的完整 Markdown 内容\n"
             )
 
         prompt = prompt_template.replace("{current_content}", markdown_content)
@@ -363,11 +376,7 @@ class ContentEditService:
                     next_newline = markdown_content.find("\n", insert_pos)
                     if next_newline == -1:
                         next_newline = len(markdown_content)
-                    updated = (
-                        markdown_content[:next_newline]
-                        + f"\n\n{new_content}"
-                        + markdown_content[next_newline:]
-                    )
+                    updated = markdown_content[:next_newline] + f"\n\n{new_content}" + markdown_content[next_newline:]
                 else:
                     updated = markdown_content + f"\n\n{new_content}"
                     reply += "（未找到指定位置，已追加到末尾）"

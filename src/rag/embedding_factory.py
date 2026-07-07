@@ -83,13 +83,14 @@ class EmbeddingFactory:
         elif provider == "openai":
             try:
                 from langchain_openai import OpenAIEmbeddings
+
                 logger.info("创建 OpenAI Embedding: %s", model_name)
                 return OpenAIEmbeddings(
                     model=model_name,
                     openai_api_key=api_key or os.getenv("OPENAI_API_KEY"),
                 )
             except ImportError:
-                raise ImportError("langchain-openai 未安装，请执行: pip install langchain-openai")
+                raise ImportError("langchain-openai 未安装，请执行: pip install langchain-openai") from None
 
         else:
             raise ValueError(f"不支持的 Embedding 提供商: {provider}")

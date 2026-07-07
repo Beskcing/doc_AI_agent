@@ -6,14 +6,13 @@ parse_input → analyze_intent → review_content → extract_style → validate
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from langgraph.graph import END, StateGraph
 
 from src.config import AppConfig
 from src.llm_client import LLMClient
-from src.models.document_schema import CleaningResult, IntentAnalysis, StyleReport
+from src.models.document_schema import IntentAnalysis
 from src.models.style_config import StyleConfig
 from src.rag.hybrid_retriever import HybridRetriever
 from src.tools.docx_styler import DocxStyler
@@ -21,7 +20,7 @@ from src.tools.html_table_preserver import HTMLTablePreserver
 from src.tools.markdown_cleaner import MarkdownCleaner
 from src.tools.mineru_parser import MinerUParser
 from src.tools.pandoc_converter import PandocConverter
-from src.utils.file_utils import ensure_dir, read_text_file, write_text_file
+from src.utils.file_utils import ensure_dir
 from src.utils.json_validator import safe_parse_llm_json, validate_style_config
 from src.utils.logger import get_logger
 from src.workflows.conditions import route_after_validation
@@ -252,9 +251,10 @@ def _extract_style(
 
     try:
         # 构建 RAG 上下文
-        rag_context = "\n\n".join(
-            r.get("content", "") for r in rag_results[:5]
-        ) or "无 RAG 检索结果，请使用国标 GB/T 9704 默认值。"
+        rag_context = (
+            "\n\n".join(r.get("content", "") for r in rag_results[:5])
+            or "无 RAG 检索结果，请使用国标 GB/T 9704 默认值。"
+        )
 
         # 特殊元素描述
         special = []
@@ -272,12 +272,13 @@ def _extract_style(
         # 注入 few-shot 示例
         try:
             from src.api.services.service_deps import ServiceDeps
-            deps = ServiceDeps(config)
+            from src.config import AppConfig
+
+            deps = ServiceDeps(AppConfig.load())
             from src.api.services.pipeline_service import PipelineService
+
             pipeline = PipelineService(deps=deps, update_status=lambda *a, **kw: None)
-            few_shot = pipeline._get_few_shot_examples(
-                standard=intent.get("detected_standard"), limit=3
-            )
+            few_shot = pipeline._get_few_shot_examples(standard=intent.get("detected_standard"), limit=3)
             prompt = prompt.replace("{few_shot_examples}", few_shot)
         except Exception:
             prompt = prompt.replace("{few_shot_examples}", "暂无历史调整记录。")

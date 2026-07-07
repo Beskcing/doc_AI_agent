@@ -9,7 +9,15 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from src.db.models import ChatMessageModel, ChatSessionModel, KbDocumentModel, StyleAdjustmentHistoryModel, StyleTemplateModel, SystemConfigModel, TaskModel
+from src.db.models import (
+    ChatMessageModel,
+    ChatSessionModel,
+    KbDocumentModel,
+    StyleAdjustmentHistoryModel,
+    StyleTemplateModel,
+    SystemConfigModel,
+    TaskModel,
+)
 
 
 class TaskCRUD:
@@ -160,9 +168,9 @@ class StyleTemplateCRUD:
     ) -> tuple[list[StyleTemplateModel], int]:
         query = db.query(StyleTemplateModel)
         total = query.count()
-        templates = query.order_by(StyleTemplateModel.created_at.desc()).offset(
-            (page - 1) * page_size
-        ).limit(page_size).all()
+        templates = (
+            query.order_by(StyleTemplateModel.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        )
         return templates, total
 
     @staticmethod
@@ -198,7 +206,7 @@ class StyleTemplateCRUD:
         import re
 
         # 从标准号提取数字关键词
-        numbers = re.findall(r'\d+', standard)
+        numbers = re.findall(r"\d+", standard)
         if not numbers:
             return None
 
@@ -208,9 +216,12 @@ class StyleTemplateCRUD:
             return None
 
         # 在模板名称中搜索
-        templates = db.query(StyleTemplateModel).filter(
-            StyleTemplateModel.name.like(f'%{keyword}%')
-        ).order_by(StyleTemplateModel.created_at.desc()).all()
+        templates = (
+            db.query(StyleTemplateModel)
+            .filter(StyleTemplateModel.name.like(f"%{keyword}%"))
+            .order_by(StyleTemplateModel.created_at.desc())
+            .all()
+        )
 
         return templates[0] if templates else None
 
@@ -258,9 +269,9 @@ class ChatSessionCRUD:
     def list_sessions(db: Session, page: int = 1, page_size: int = 50) -> tuple[list[ChatSessionModel], int]:
         query = db.query(ChatSessionModel)
         total = query.count()
-        sessions = query.order_by(ChatSessionModel.updated_at.desc()).offset(
-            (page - 1) * page_size
-        ).limit(page_size).all()
+        sessions = (
+            query.order_by(ChatSessionModel.updated_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        )
         return sessions, total
 
     @staticmethod
@@ -360,9 +371,12 @@ class StyleAdjustmentHistoryCRUD:
 
     @staticmethod
     def list_by_task(db: Session, task_id: str) -> list[StyleAdjustmentHistoryModel]:
-        return db.query(StyleAdjustmentHistoryModel).filter(
-            StyleAdjustmentHistoryModel.task_id == task_id
-        ).order_by(StyleAdjustmentHistoryModel.created_at.desc()).all()
+        return (
+            db.query(StyleAdjustmentHistoryModel)
+            .filter(StyleAdjustmentHistoryModel.task_id == task_id)
+            .order_by(StyleAdjustmentHistoryModel.created_at.desc())
+            .all()
+        )
 
     @staticmethod
     def list_recent(db: Session, limit: int = 10, standard: str | None = None) -> list[StyleAdjustmentHistoryModel]:
@@ -374,9 +388,7 @@ class StyleAdjustmentHistoryCRUD:
 
     @staticmethod
     def delete_by_task(db: Session, task_id: str) -> bool:
-        records = db.query(StyleAdjustmentHistoryModel).filter(
-            StyleAdjustmentHistoryModel.task_id == task_id
-        ).all()
+        records = db.query(StyleAdjustmentHistoryModel).filter(StyleAdjustmentHistoryModel.task_id == task_id).all()
         for record in records:
             db.delete(record)
         db.commit()

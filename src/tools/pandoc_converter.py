@@ -106,7 +106,7 @@ class PandocConverter:
         args.extend(self.extra_args)
 
         try:
-            result_text = self._run_pandoc(markdown, args, str(output_path))
+            self._run_pandoc(markdown, args, str(output_path))
             success = output_path.exists() and get_file_size_mb(output_path) > 0
 
             if success:
@@ -195,9 +195,9 @@ class PandocConverter:
             return result.stdout
 
         except subprocess.TimeoutExpired:
-            raise RuntimeError("Pandoc 执行超时（120秒）")
+            raise RuntimeError("Pandoc 执行超时（120秒）") from None
         except FileNotFoundError:
-            raise RuntimeError(f"Pandoc 可执行文件未找到: {self.pandoc_path}")
+            raise RuntimeError(f"Pandoc 可执行文件未找到: {self.pandoc_path}") from None
 
     def validate_output(self, output_path: str | Path) -> ConversionReport:
         """校验转换结果
@@ -234,6 +234,7 @@ class PandocConverter:
         if output_path.suffix.lower() == ".docx":
             try:
                 from docx import Document
+
                 doc = Document(str(output_path))
                 para_count = len(doc.paragraphs)
                 table_count = len(doc.tables)
@@ -265,5 +266,3 @@ class PandocConverter:
         inline_pattern = re.compile(r"(?<!\$)\$(?!\$)[^$]+?(?<!\$)\$(?!\$)")
         formulas.extend(inline_pattern.findall(markdown))
         return formulas
-
-

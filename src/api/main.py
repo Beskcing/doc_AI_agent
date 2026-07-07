@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 
 from src.api.routers import chat_router, config_router, kb_router, tasks_router, templates_router, upload_router
 from src.db.database import init_db
@@ -57,6 +57,17 @@ app.include_router(kb_router)
 app.include_router(config_router)
 app.include_router(templates_router)
 app.include_router(chat_router)
+
+
+# 全局异常处理
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """捕获未处理的异常，统一返回 500 响应"""
+    logger.exception("未捕获异常: %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"code": 500, "message": f"服务器内部错误: {type(exc).__name__}", "detail": str(exc)},
+    )
 
 
 # 健康检查

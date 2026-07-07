@@ -3,11 +3,11 @@
 Pandoc 的 markdown+raw_html 不会将 HTML 表格转换为 DOCX 原生表格。
 需要先将 HTML 表格转为 Markdown 管道表格格式，再通过 Pandoc 转换。
 """
+
 from __future__ import annotations
 
 import re
 from html.parser import HTMLParser
-from typing import Any
 
 
 class HTMLTableExtractor(HTMLParser):
@@ -81,9 +81,7 @@ class HTMLTableExtractor(HTMLParser):
                         target_row = row_idx + offset
                         if target_row not in self._rowspan_carry:
                             self._rowspan_carry[target_row] = []
-                        self._rowspan_carry[target_row].append(
-                            (self._row_col_idx, [cell_text_str])
-                        )
+                        self._rowspan_carry[target_row].append((self._row_col_idx, [cell_text_str]))
                 self._row_col_idx += self._cell_colspan
                 self._in_cell = False
                 self._cell_data = []

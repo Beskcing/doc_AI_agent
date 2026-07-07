@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse
 
@@ -130,10 +130,12 @@ async def get_task_stats() -> ResponseModel:
     try:
         stats = task_manager.get_stats()
         recent = task_manager.get_recent_tasks(limit=5)
-        return ResponseModel(data={
-            "stats": stats,
-            "recent_tasks": [task_manager.to_info_dict(t) for t in recent],
-        })
+        return ResponseModel(
+            data={
+                "stats": stats,
+                "recent_tasks": [task_manager.to_info_dict(t) for t in recent],
+            }
+        )
     except Exception as e:
         logger.exception("获取统计失败")
         return ResponseModel(code=500, message=f"获取统计失败: {e}")
@@ -147,9 +149,7 @@ async def list_tasks(
 ) -> ResponseModel:
     """获取任务列表"""
     try:
-        tasks, total = task_manager.list_tasks(
-            page=page, page_size=page_size, status=status.value if status else None
-        )
+        tasks, total = task_manager.list_tasks(page=page, page_size=page_size, status=status.value if status else None)
         return ResponseModel(
             data=TaskListResponse(
                 total=total,
@@ -312,8 +312,10 @@ async def preview_result(task_id: str) -> ResponseModel:
             markdown_preview = cleaned_md_path.read_text(encoding="utf-8")
             # 同步更新数据库（BUG 修复：移除不必要的 update_status 空操作调用）
             from src.db.session import get_db_session
+
             with get_db_session() as db:
                 from src.db.crud import TaskCRUD
+
                 t = TaskCRUD.get(db, task_id)
                 if t:
                     t.cleaned_markdown_preview = markdown_preview
@@ -367,16 +369,22 @@ async def preview_original_pdf(
         raise HTTPException(status_code=400, detail="任务尚未完成")
 
     result = await run_in_threadpool(
-        task_manager.get_pdf_page_images, task_id, 150, page, page_size,
+        task_manager.get_pdf_page_images,
+        task_id,
+        150,
+        page,
+        page_size,
     )
     if not result:
         raise HTTPException(status_code=404, detail="原始 PDF 不存在或转换失败")
 
-    return ResponseModel(data={
-        "pages": result["pages"],
-        "total": len(result["pages"]),
-        "total_pages": result["total_pages"],
-    })
+    return ResponseModel(
+        data={
+            "pages": result["pages"],
+            "total": len(result["pages"]),
+            "total_pages": result["total_pages"],
+        }
+    )
 
 
 @router.get("/{task_id}/preview/mineru-docx")
@@ -424,13 +432,18 @@ async def apply_template_to_task(task_id: str, request: ApplyTemplateRequest) ->
 
         # BUG 修复：在线程池中执行样式渲染，避免阻塞事件循环
         result_path = await run_in_threadpool(
-            task_manager.apply_template_to_task, task_id, style_config,
-            True, request.source,
+            task_manager.apply_template_to_task,
+            task_id,
+            style_config,
+            True,
+            request.source,
         )
-        return ResponseModel(data={
-            "result_path": result_path,
-            "style_config": style_config,
-        })
+        return ResponseModel(
+            data={
+                "result_path": result_path,
+                "style_config": style_config,
+            }
+        )
     except Exception as e:
         logger.exception("应用模板失败")
         return ResponseModel(code=500, message=f"应用模板失败: {e}")
@@ -453,6 +466,7 @@ async def upload_corrected_docx(task_id: str, file: UploadFile = File(...)) -> R
     try:
         # 保存上传的文件
         import uuid as uuid_mod
+
         upload_id = str(uuid_mod.uuid4())
         corrected_path = UPLOAD_DIR / f"{upload_id}_corrected.docx"
         contents = await file.read()
@@ -460,9 +474,7 @@ async def upload_corrected_docx(task_id: str, file: UploadFile = File(...)) -> R
             f.write(contents)
 
         # 在线程池中执行样式提取和重新渲染
-        result = await run_in_threadpool(
-            task_manager.upload_corrected_docx, task_id, str(corrected_path)
-        )
+        result = await run_in_threadpool(task_manager.upload_corrected_docx, task_id, str(corrected_path))
 
         logger.info("任务 %s: 修正后 DOCX 上传处理完成", task_id)
         return ResponseModel(data=result)
@@ -485,7 +497,8 @@ async def save_style_to_template(task_id: str, request: SaveStyleToTemplateReque
             if request.template_id:
                 # 更新已有模板
                 template = StyleTemplateCRUD.update(
-                    db, request.template_id,
+                    db,
+                    request.template_id,
                     name=request.template_name,
                     style_config=request.style_config,
                     description=request.description,
@@ -503,10 +516,12 @@ async def save_style_to_template(task_id: str, request: SaveStyleToTemplateReque
                 )
                 logger.info("任务 %s: 样式已保存为新模板 %s", task_id, template.id)
 
-            return ResponseModel(data={
-                "template_id": template.id,
-                "template_name": template.name,
-            })
+            return ResponseModel(
+                data={
+                    "template_id": template.id,
+                    "template_name": template.name,
+                }
+            )
     except Exception as e:
         logger.exception("保存样式到模板失败")
         return ResponseModel(code=500, message=f"保存失败: {e}")
@@ -521,22 +536,24 @@ async def get_style_history(task_id: str) -> ResponseModel:
 
         with get_db_session() as db:
             records = StyleAdjustmentHistoryCRUD.list_by_task(db, task_id)
-            return ResponseModel(data={
-                "items": [
-                    {
-                        "id": r.id,
-                        "task_id": r.task_id,
-                        "source": r.source,
-                        "before_config": r.before_config,
-                        "after_config": r.after_config,
-                        "diff_summary": r.diff_summary,
-                        "standard": r.standard,
-                        "created_at": r.created_at.isoformat() if r.created_at else None,
-                    }
-                    for r in records
-                ],
-                "total": len(records),
-            })
+            return ResponseModel(
+                data={
+                    "items": [
+                        {
+                            "id": r.id,
+                            "task_id": r.task_id,
+                            "source": r.source,
+                            "before_config": r.before_config,
+                            "after_config": r.after_config,
+                            "diff_summary": r.diff_summary,
+                            "standard": r.standard,
+                            "created_at": r.created_at.isoformat() if r.created_at else None,
+                        }
+                        for r in records
+                    ],
+                    "total": len(records),
+                }
+            )
     except Exception as e:
         logger.exception("获取样式调整历史失败")
         return ResponseModel(code=500, message=f"获取历史失败: {e}")
@@ -561,10 +578,12 @@ async def get_task_content(task_id: str) -> ResponseModel:
             if md_path.exists():
                 markdown_content = md_path.read_text(encoding="utf-8")
 
-        return ResponseModel(data={
-            "content": markdown_content or "",
-            "content_type": "markdown",
-        })
+        return ResponseModel(
+            data={
+                "content": markdown_content or "",
+                "content_type": "markdown",
+            }
+        )
     except Exception as e:
         logger.exception("获取任务内容失败")
         return ResponseModel(code=500, message=f"获取内容失败: {e}")

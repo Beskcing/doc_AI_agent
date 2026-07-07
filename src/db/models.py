@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String, Text, ForeignKey
+from sqlalchemy import JSON, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.database import Base
@@ -145,7 +145,9 @@ class StyleAdjustmentHistoryModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     task_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    source: Mapped[str] = mapped_column(String(50), nullable=False)  # edit_style / upload_corrected / apply_template / chat
+    source: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # edit_style / upload_corrected / apply_template / chat
     before_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     after_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     diff_summary: Mapped[str | None] = mapped_column(Text, nullable=True)

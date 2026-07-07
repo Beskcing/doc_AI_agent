@@ -370,6 +370,7 @@ async def chat_edit_content(request: ContentEditRequest) -> ResponseModel:
     用户发送修改指令，LLM 修改文档 Markdown 内容并重新生成 DOCX。
     """
     from fastapi.concurrency import run_in_threadpool
+
     from src.api.services.task_manager import task_manager
 
     try:

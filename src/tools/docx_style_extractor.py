@@ -14,14 +14,13 @@
 
 from __future__ import annotations
 
-import re
 from collections import Counter
 from pathlib import Path
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.shared import Cm, Emu, Pt
+from docx.shared import Cm
 
 from src.tools.content_pattern_matcher import (
     APPENDIX_CLAUSE_PATTERNS,
@@ -49,10 +48,18 @@ ALIGNMENT_REVERSE_MAP = {
 
 # 标题样式名映射
 HEADING_STYLE_MAP = {
-    "Heading 1": 1, "Heading 2": 2, "Heading 3": 3,
-    "Heading 4": 4, "Heading 5": 5, "Heading 6": 6,
-    "heading 1": 1, "heading 2": 2, "heading 3": 3,
-    "heading 4": 4, "heading 5": 5, "heading 6": 6,
+    "Heading 1": 1,
+    "Heading 2": 2,
+    "Heading 3": 3,
+    "Heading 4": 4,
+    "Heading 5": 5,
+    "Heading 6": 6,
+    "heading 1": 1,
+    "heading 2": 2,
+    "heading 3": 3,
+    "heading 4": 4,
+    "heading 5": 5,
+    "heading 6": 6,
     "Title": 1,  # Title 样式视为一级标题
 }
 
@@ -242,16 +249,12 @@ class DocxStyleExtractor:
                     if pf.space_after is not None:
                         style_def["space_after_pt"] = _emu_to_pt(pf.space_after)
                     if pf.alignment is not None:
-                        style_def["alignment"] = ALIGNMENT_REVERSE_MAP.get(
-                            pf.alignment, "left"
-                        )
+                        style_def["alignment"] = ALIGNMENT_REVERSE_MAP.get(pf.alignment, "left")
                     if pf.first_line_indent is not None:
                         font_size = font_config.get("size_pt", 16)
                         indent_pt = _emu_to_pt(pf.first_line_indent)
                         if font_size > 0:
-                            style_def["first_line_indent_chars"] = round(
-                                indent_pt / font_size, 1
-                            )
+                            style_def["first_line_indent_chars"] = round(indent_pt / font_size, 1)
                     if pf.left_indent is not None:
                         style_def["left_indent_cm"] = _emu_to_cm(pf.left_indent)
                     if pf.right_indent is not None:
@@ -383,7 +386,7 @@ class DocxStyleExtractor:
             sect_pr = section._sectPr
             # 查找页码字段
             footer_refs = sect_pr.findall(qn("w:footerReference"))
-            for fref in footer_refs:
+            for _fref in footer_refs:
                 # 页码格式可能在 footer 的 fldChar 中
                 pass
             # 从 pgNumType 提取页码格式
@@ -436,7 +439,6 @@ class DocxStyleExtractor:
         try:
             font_config = self._extract_font_from_paragraph(paragraph)
             size_pt = font_config.get("size_pt", 0)
-            bold = font_config.get("bold", False)
             alignment = self._extract_alignment(paragraph)
             is_center = alignment == "center"
             is_large = size_pt and size_pt >= 14
@@ -465,7 +467,7 @@ class DocxStyleExtractor:
         if not cover_paragraphs:
             return None
 
-        sample = cover_paragraphs[:min(5, len(cover_paragraphs))]
+        sample = cover_paragraphs[: min(5, len(cover_paragraphs))]
         font_configs = [self._extract_font_from_paragraph(p) for p in sample]
         alignments = [self._extract_alignment(p) for p in sample]
         line_spacings = [self._extract_line_spacing_full(p) for p in sample]
@@ -525,7 +527,7 @@ class DocxStyleExtractor:
         if not appendix_paragraphs:
             return None
 
-        sample = appendix_paragraphs[:min(5, len(appendix_paragraphs))]
+        sample = appendix_paragraphs[: min(5, len(appendix_paragraphs))]
         font_configs = [self._extract_font_from_paragraph(p) for p in sample]
         alignments = [self._extract_alignment(p) for p in sample]
         line_spacings = [self._extract_line_spacing_full(p) for p in sample]
@@ -566,7 +568,7 @@ class DocxStyleExtractor:
         if not clause_paragraphs:
             return None
 
-        sample = clause_paragraphs[:min(10, len(clause_paragraphs))]
+        sample = clause_paragraphs[: min(10, len(clause_paragraphs))]
         font_configs = [self._extract_font_from_paragraph(p) for p in sample]
         alignments = [self._extract_alignment(p) for p in sample]
         line_spacings = [self._extract_line_spacing_full(p) for p in sample]
@@ -604,7 +606,7 @@ class DocxStyleExtractor:
         if not caption_paragraphs:
             return None
 
-        sample = caption_paragraphs[:min(5, len(caption_paragraphs))]
+        sample = caption_paragraphs[: min(5, len(caption_paragraphs))]
         font_configs = [self._extract_font_from_paragraph(p) for p in sample]
         alignments = [self._extract_alignment(p) for p in sample]
 
@@ -628,9 +630,7 @@ class DocxStyleExtractor:
 
     # ==================== 标题样式 ====================
 
-    def _extract_heading_styles(
-        self, doc: Document, style_defs: dict
-    ) -> list[dict]:
+    def _extract_heading_styles(self, doc: Document, style_defs: dict) -> list[dict]:
         """提取各级标题样式
 
         策略：
@@ -821,17 +821,29 @@ class DocxStyleExtractor:
 
         result = dict(base) if base else {}
         result["font"] = self._merge_font_configs(font_configs) if font_configs else result.get("font", {})
-        result["alignment"] = Counter(alignments).most_common(1)[0][0] if alignments else result.get("alignment", "left")
+        result["alignment"] = (
+            Counter(alignments).most_common(1)[0][0] if alignments else result.get("alignment", "left")
+        )
         if line_spacings:
             ls, ls_pt, ls_rule = self._most_common_tuple(line_spacings)
             result["line_spacing"] = ls
             result["line_spacing_pt"] = ls_pt
             result["line_spacing_rule"] = ls_rule
-        result["space_before_pt"] = Counter(space_befores).most_common(1)[0][0] if space_befores else result.get("space_before_pt", 0)
-        result["space_after_pt"] = Counter(space_afters).most_common(1)[0][0] if space_afters else result.get("space_after_pt", 0)
-        result["first_line_indent_chars"] = Counter(first_indents).most_common(1)[0][0] if first_indents else result.get("first_line_indent_chars", 0)
-        result["left_indent_cm"] = Counter(left_indents).most_common(1)[0][0] if left_indents else result.get("left_indent_cm", 0)
-        result["right_indent_cm"] = Counter(right_indents).most_common(1)[0][0] if right_indents else result.get("right_indent_cm", 0)
+        result["space_before_pt"] = (
+            Counter(space_befores).most_common(1)[0][0] if space_befores else result.get("space_before_pt", 0)
+        )
+        result["space_after_pt"] = (
+            Counter(space_afters).most_common(1)[0][0] if space_afters else result.get("space_after_pt", 0)
+        )
+        result["first_line_indent_chars"] = (
+            Counter(first_indents).most_common(1)[0][0] if first_indents else result.get("first_line_indent_chars", 0)
+        )
+        result["left_indent_cm"] = (
+            Counter(left_indents).most_common(1)[0][0] if left_indents else result.get("left_indent_cm", 0)
+        )
+        result["right_indent_cm"] = (
+            Counter(right_indents).most_common(1)[0][0] if right_indents else result.get("right_indent_cm", 0)
+        )
         result.setdefault("keep_together", False)
         result.setdefault("keep_with_next", False)
         result.setdefault("widow_control", True)
@@ -966,7 +978,6 @@ class DocxStyleExtractor:
         has_bottom = "bottom" in borders and borders["bottom"]["style"] != "none"
         has_left = "left" in borders and borders["left"]["style"] != "none"
         has_right = "right" in borders and borders["right"]["style"] != "none"
-        has_inside_h = "insideH" in borders and borders["insideH"]["style"] != "none"
         has_inside_v = "insideV" in borders and borders["insideV"]["style"] != "none"
 
         # 三线表：有上下，无左右，无内部垂直
@@ -1135,7 +1146,7 @@ class DocxStyleExtractor:
         font_configs = [self._extract_font_from_paragraph(p) for p in sample]
         alignments = [self._extract_alignment(p) for p in sample]
         line_spacings = [self._extract_line_spacing_full(p) for p in sample]
-        space_befores, space_afters = zip(*[self._extract_spacing(p) for p in sample])
+        space_befores, space_afters = zip(*[self._extract_spacing(p) for p in sample], strict=False)
         first_indents = [self._extract_first_indent(p) for p in sample]
         left_indents = [self._extract_left_indent(p) for p in sample]
 
@@ -1451,9 +1462,7 @@ class DocxStyleExtractor:
         try:
             if paragraph.style and paragraph.style.paragraph_format:
                 if paragraph.style.paragraph_format.alignment is not None:
-                    return ALIGNMENT_REVERSE_MAP.get(
-                        paragraph.style.paragraph_format.alignment, "left"
-                    )
+                    return ALIGNMENT_REVERSE_MAP.get(paragraph.style.paragraph_format.alignment, "left")
         except Exception:
             pass
         return "left"

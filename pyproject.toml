@@ -57,6 +57,7 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.5",
     "httpx>=0.27",
+    "pre-commit>=3.7",
 ]
 all = [
     "doc-ai-agent[mineru,dev]",
@@ -79,7 +80,12 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B"]
-ignore = ["E501"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/tools/docx_styler.py" = ["N806"]
+"src/tools/docx_style_extractor.py" = ["N806"]
+"migrations/*" = ["E", "F", "W", "I", "N", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

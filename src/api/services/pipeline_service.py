@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from src.api.services.service_deps import ServiceDeps
 from src.db.session import get_db_session
@@ -96,8 +96,6 @@ class PipelineService:
                 template_id = matched["id"]
                 logger.info("任务 %s: 自动匹配模板: %s (%s)", task_id, matched["name"], template_id)
                 with get_db_session() as db:
-                    from sqlalchemy.orm.attributes import flag_modified
-
                     from src.db.crud import TaskCRUD
 
                     task_db = TaskCRUD.get(db, task_id)
@@ -162,9 +160,12 @@ class PipelineService:
 
         def on_progress(stage: str, info: dict) -> None:
             stage_map = {
-                "uploading": ("上传文件中", 2), "submitting": ("提交任务中", 2),
-                "pending": ("排队中", 3), "running": ("解析中", 5),
-                "converting": ("格式转换中", 8), "done": ("解析完成", 10),
+                "uploading": ("上传文件中", 2),
+                "submitting": ("提交任务中", 2),
+                "pending": ("排队中", 3),
+                "running": ("解析中", 5),
+                "converting": ("格式转换中", 8),
+                "done": ("解析完成", 10),
             }
             desc, prog = stage_map.get(stage, (stage, 5))
             self._update_status(task_id, "processing", progress=prog, current_step=f"mineru_{stage}")
@@ -174,8 +175,10 @@ class PipelineService:
             from src.tools.mineru_parser import MinerUParser
 
             parser = MinerUParser(
-                output_dir=str(output_dir), mode=mineru_cfg.mode,
-                api_token=mineru_cfg.get_token(), model_version=mineru_cfg.model_version,
+                output_dir=str(output_dir),
+                mode=mineru_cfg.mode,
+                api_token=mineru_cfg.get_token(),
+                model_version=mineru_cfg.model_version,
             )
             logger.info("任务 %s: MinerU 解析 PDF: %s (mode=%s)", task_id, file_path, mineru_cfg.mode)
             extra_formats = ["docx"] if mineru_cfg.mode == "online" else None
@@ -183,8 +186,12 @@ class PipelineService:
             markdown_content = parsed_doc.raw_markdown
             extract_dir = parsed_doc.metadata.get("extract_dir", str(output_dir))
             mineru_docx_path = parsed_doc.metadata.get("mineru_docx_path")
-            logger.info("任务 %s: MinerU 解析完成, Markdown %d 字符, DOCX=%s",
-                        task_id, len(markdown_content), mineru_docx_path or "无")
+            logger.info(
+                "任务 %s: MinerU 解析完成, Markdown %d 字符, DOCX=%s",
+                task_id,
+                len(markdown_content),
+                mineru_docx_path or "无",
+            )
             return markdown_content, extract_dir, mineru_docx_path
         except Exception as e:
             logger.error("任务 %s: MinerU 解析失败: %s", task_id, e)
@@ -226,8 +233,9 @@ class PipelineService:
                 intent = IntentAnalysis()
             if target_standard:
                 intent.detected_standard = target_standard
-            logger.info("任务 %s: 意图分析完成 - 类型=%s, 标准=%s",
-                        task_id, intent.document_type, intent.detected_standard)
+            logger.info(
+                "任务 %s: 意图分析完成 - 类型=%s, 标准=%s", task_id, intent.document_type, intent.detected_standard
+            )
             return intent
         except Exception as e:
             logger.error("任务 %s: 意图分析失败: %s", task_id, e)
@@ -250,19 +258,24 @@ class PipelineService:
                 logger.warning("自动匹配模板失败: %s", e)
                 return None
 
-    def _clean_markdown(self, task_id: str, markdown_content: str, extract_dir: str,
-                        intent: IntentAnalysis | None = None) -> str:
+    def _clean_markdown(
+        self, task_id: str, markdown_content: str, extract_dir: str, intent: IntentAnalysis | None = None
+    ) -> str:
         """清洗 Markdown：规则预处理 + LLM 智能审查 + HTML 表格→Pipe 转换"""
-        from src.tools.markdown_cleaner import MarkdownCleaner
         from src.tools.html_to_pipe import convert_html_tables_in_markdown
+        from src.tools.markdown_cleaner import MarkdownCleaner
 
         markdown_content = self._insert_image_refs(markdown_content, extract_dir)
         cleaner = MarkdownCleaner(llm_client=self.deps.get_llm_client(), base_dir=extract_dir)
         result = cleaner.clean(markdown_content, context=intent)
         cleaned = result.cleaned_markdown
         cleaned = convert_html_tables_in_markdown(cleaned)
-        logger.info("任务 %s: Markdown 清洗完成, %d 处修改, %d 个缺失图片",
-                    task_id, len(result.changes_log), result.images_missing)
+        logger.info(
+            "任务 %s: Markdown 清洗完成, %d 处修改, %d 个缺失图片",
+            task_id,
+            len(result.changes_log),
+            result.images_missing,
+        )
         return cleaned
 
     def _insert_image_refs(self, markdown: str, extract_dir: str) -> str:
@@ -362,8 +375,9 @@ class PipelineService:
 
     def _convert_to_docx(self, task_id: str, markdown: str, extract_dir: str) -> str:
         """通过 Pandoc 将 Markdown 转换为 DOCX"""
-        import pypandoc
         import tempfile
+
+        import pypandoc
 
         result_dir = Path("data/output") / task_id
         result_dir.mkdir(parents=True, exist_ok=True)
@@ -371,7 +385,11 @@ class PipelineService:
         extract_path = Path(extract_dir)
 
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".md", encoding="utf-8", delete=False, dir=str(extract_path),
+            mode="w",
+            suffix=".md",
+            encoding="utf-8",
+            delete=False,
+            dir=str(extract_path),
         ) as tmp:
             tmp.write(markdown)
             md_tmp_path = tmp.name
@@ -383,13 +401,17 @@ class PipelineService:
             if ref_docx.exists():
                 extra_args.extend(["--reference-doc", str(ref_docx)])
             pypandoc.convert_file(
-                md_tmp_path, "docx", outputfile=str(docx_path),
-                format="markdown+raw_html+tex_math_dollars", extra_args=extra_args,
+                md_tmp_path,
+                "docx",
+                outputfile=str(docx_path),
+                format="markdown+raw_html+tex_math_dollars",
+                extra_args=extra_args,
             )
             if not docx_path.exists() or docx_path.stat().st_size == 0:
                 raise RuntimeError("Pandoc 生成的 DOCX 文件为空")
-            logger.info("任务 %s: DOCX 生成成功: %s (%.2f MB)",
-                        task_id, docx_path, docx_path.stat().st_size / 1024 / 1024)
+            logger.info(
+                "任务 %s: DOCX 生成成功: %s (%.2f MB)", task_id, docx_path, docx_path.stat().st_size / 1024 / 1024
+            )
             return str(docx_path)
         finally:
             try:
@@ -410,11 +432,21 @@ class PipelineService:
         except Exception as e:
             logger.warning("任务 %s: 样式配置校验失败，使用默认样式: %s", task_id, e)
             style = StyleConfig(
-                page_layout={"paper_size": "A4", "margin_top_cm": 3.7, "margin_bottom_cm": 3.5,
-                             "margin_left_cm": 2.8, "margin_right_cm": 2.6,
-                             "header_distance_cm": 1.5, "footer_distance_cm": 1.75},
-                body_style={"font": {"family": "仿宋_GB2312", "size_pt": 16},
-                           "line_spacing": 1.5, "first_line_indent_chars": 2, "alignment": "justify"},
+                page_layout={
+                    "paper_size": "A4",
+                    "margin_top_cm": 3.7,
+                    "margin_bottom_cm": 3.5,
+                    "margin_left_cm": 2.8,
+                    "margin_right_cm": 2.6,
+                    "header_distance_cm": 1.5,
+                    "footer_distance_cm": 1.75,
+                },
+                body_style={
+                    "font": {"family": "仿宋_GB2312", "size_pt": 16},
+                    "line_spacing": 1.5,
+                    "first_line_indent_chars": 2,
+                    "alignment": "justify",
+                },
             )
 
         styler = DocxStyler(style)
@@ -423,15 +455,21 @@ class PipelineService:
         if not report.success:
             logger.warning("任务 %s: 样式应用部分失败: %s", task_id, report.warnings)
             import shutil
+
             shutil.copy(docx_path, styled_path)
             logger.info("任务 %s: 回退到原始输出", task_id)
 
         logger.info("任务 %s: 样式应用完成 → %s", task_id, styled_path)
         return str(styled_path)
 
-    def apply_template_to_task(self, task_id: str, style_config: dict,
-                               get_task_fn, record_adjustment: bool = True,
-                               source: str = "apply_template") -> str:
+    def apply_template_to_task(
+        self,
+        task_id: str,
+        style_config: dict,
+        get_task_fn,
+        record_adjustment: bool = True,
+        source: str = "apply_template",
+    ) -> str:
         """对已完成任务重新应用样式模板"""
         task = get_task_fn(task_id)
         if not task:
@@ -472,14 +510,15 @@ class PipelineService:
 
         if record_adjustment:
             self._record_style_adjustment(
-                task_id=task_id, source=source,
-                before_config=before_config, after_config=style_config,
+                task_id=task_id,
+                source=source,
+                before_config=before_config,
+                after_config=style_config,
                 standard=task.standard,
             )
         return styled_path
 
-    def upload_corrected_docx(self, task_id: str, corrected_docx_path: str,
-                              get_task_fn) -> dict:
+    def upload_corrected_docx(self, task_id: str, corrected_docx_path: str, get_task_fn) -> dict:
         """处理用户上传的修正后 DOCX 文件"""
         task = get_task_fn(task_id)
         if not task:
@@ -498,14 +537,22 @@ class PipelineService:
             task_id, style_config, get_task_fn, record_adjustment=False, source="upload_corrected"
         )
         self._record_style_adjustment(
-            task_id=task_id, source="upload_corrected",
-            before_config=before_config, after_config=style_config, standard=task.standard,
+            task_id=task_id,
+            source="upload_corrected",
+            before_config=before_config,
+            after_config=style_config,
+            standard=task.standard,
         )
         return {"style_config": style_config, "result_path": styled_path}
 
-    def _record_style_adjustment(self, task_id: str, source: str,
-                                 before_config: dict | None, after_config: dict | None,
-                                 standard: str | None = None) -> None:
+    def _record_style_adjustment(
+        self,
+        task_id: str,
+        source: str,
+        before_config: dict | None,
+        after_config: dict | None,
+        standard: str | None = None,
+    ) -> None:
         """记录样式调整历史"""
         from src.db.crud import StyleAdjustmentHistoryCRUD
 
@@ -513,12 +560,20 @@ class PipelineService:
         with get_db_session() as db:
             try:
                 StyleAdjustmentHistoryCRUD.create(
-                    db, task_id=task_id, source=source,
-                    before_config=before_config, after_config=after_config,
-                    diff_summary=diff_summary, standard=standard,
+                    db,
+                    task_id=task_id,
+                    source=source,
+                    before_config=before_config,
+                    after_config=after_config,
+                    diff_summary=diff_summary,
+                    standard=standard,
                 )
-                logger.info("任务 %s: 样式调整已记录 (source=%s, diff=%s)",
-                            task_id, source, diff_summary[:100] if diff_summary else "无")
+                logger.info(
+                    "任务 %s: 样式调整已记录 (source=%s, diff=%s)",
+                    task_id,
+                    source,
+                    diff_summary[:100] if diff_summary else "无",
+                )
             except Exception as e:
                 logger.warning("记录样式调整失败: %s", e)
 
@@ -591,22 +646,37 @@ class PipelineService:
         """默认样式配置（LLM 降级用）"""
         return {
             "page_layout": {
-                "paper_size": "A4", "margin_top_cm": 3.7, "margin_bottom_cm": 3.5,
-                "margin_left_cm": 2.8, "margin_right_cm": 2.6,
-                "header_distance_cm": 1.5, "footer_distance_cm": 1.75,
+                "paper_size": "A4",
+                "margin_top_cm": 3.7,
+                "margin_bottom_cm": 3.5,
+                "margin_left_cm": 2.8,
+                "margin_right_cm": 2.6,
+                "header_distance_cm": 1.5,
+                "footer_distance_cm": 1.75,
             },
             "heading_styles": [
-                {"level": 1, "font": {"family": "黑体", "size_pt": 22, "bold": True},
-                 "alignment": "center", "line_spacing": 2.0},
-                {"level": 2, "font": {"family": "黑体", "size_pt": 16, "bold": True},
-                 "alignment": "left", "line_spacing": 1.5},
+                {
+                    "level": 1,
+                    "font": {"family": "黑体", "size_pt": 22, "bold": True},
+                    "alignment": "center",
+                    "line_spacing": 2.0,
+                },
+                {
+                    "level": 2,
+                    "font": {"family": "黑体", "size_pt": 16, "bold": True},
+                    "alignment": "left",
+                    "line_spacing": 1.5,
+                },
             ],
             "body_style": {
                 "font": {"family": "仿宋_GB2312", "size_pt": 16},
-                "line_spacing": 1.5, "first_line_indent_chars": 2, "alignment": "justify",
+                "line_spacing": 1.5,
+                "first_line_indent_chars": 2,
+                "alignment": "justify",
             },
             "table_style": {
-                "border_style": "single", "border_width_pt": 0.5,
+                "border_style": "single",
+                "border_width_pt": 0.5,
                 "header_font": {"family": "黑体", "size_pt": 12, "bold": True},
                 "body_font": {"family": "仿宋_GB2312", "size_pt": 10.5},
                 "header_bold": True,

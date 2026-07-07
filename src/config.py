@@ -140,7 +140,7 @@ class AppConfig(BaseModel):
             instance._validate_required()
             return instance
 
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
 
         instance = cls._from_raw(raw)

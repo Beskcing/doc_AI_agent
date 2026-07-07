@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from src.api.models import ResponseModel, SystemConfig, UpdateConfigRequest
+from src.api.models import ResponseModel, UpdateConfigRequest
 from src.db.crud import SystemConfigCRUD
 from src.db.session import get_db_session
 from src.utils.logger import get_logger

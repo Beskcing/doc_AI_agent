@@ -95,13 +95,15 @@ async def batch_upload_files(files: list[UploadFile] = File(...)) -> ResponseMod
                 json.dump({"original_filename": original_filename}, f, ensure_ascii=False)
 
             file_size = os.path.getsize(file_path)
-            results.append(UploadResponse(
-                upload_id=upload_id,
-                filename=original_filename,
-                file_size=file_size,
-                content_type=file.content_type or "application/octet-stream",
-            ))
-        except Exception as e:
+            results.append(
+                UploadResponse(
+                    upload_id=upload_id,
+                    filename=original_filename,
+                    file_size=file_size,
+                    content_type=file.content_type or "application/octet-stream",
+                )
+            )
+        except Exception:
             logger.exception("批量上传: 文件保存失败: %s", file.filename)
 
     if not results:

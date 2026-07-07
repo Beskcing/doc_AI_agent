@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from docx import Document
@@ -20,10 +19,8 @@ from src.models.document_schema import StyleReport
 from src.models.style_config import (
     FontConfig,
     HeadingStyleConfig,
-    PageLayoutConfig,
     ParagraphStyleConfig,
     StyleConfig,
-    TableStyleConfig,
 )
 from src.utils.file_utils import ensure_dir
 from src.utils.logger import get_logger
@@ -141,11 +138,7 @@ class DocxStyler:
                 paragraphs_styled += 1
             elif role == "table_caption":
                 # 表格标题样式（表B.1/表1等），优先使用专用样式，回退到 caption 再到正文
-                tc_style = (
-                    self.config.table_caption_style
-                    or self.config.caption_style
-                    or self.config.body_style
-                )
+                tc_style = self.config.table_caption_style or self.config.caption_style or self.config.body_style
                 self._apply_paragraph_style(paragraph, tc_style)
                 paragraphs_styled += 1
             elif role == "preface":
@@ -191,7 +184,10 @@ class DocxStyler:
             doc.save(str(output_path))
             logger.info(
                 "样式应用完成: %d 段落, %d 标题, %d 表格 → %s",
-                paragraphs_styled, headings_styled, tables_styled, output_path,
+                paragraphs_styled,
+                headings_styled,
+                tables_styled,
+                output_path,
             )
         except Exception as e:
             return StyleReport(
@@ -270,6 +266,7 @@ class DocxStyler:
             pf.line_spacing = Pt(style.line_spacing_pt)
         elif style.line_spacing_rule == "at_least" and style.line_spacing_pt is not None:
             from docx.enum.text import WD_LINE_SPACING
+
             pf.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
             pf.line_spacing = Pt(style.line_spacing_pt)
         else:
@@ -289,9 +286,9 @@ class DocxStyler:
             pf.right_indent = Cm(style.right_indent_cm)
 
         # 段落分页控制
-        if hasattr(style, 'keep_together') and style.keep_together:
+        if hasattr(style, "keep_together") and style.keep_together:
             pf.keep_together = True
-        if hasattr(style, 'widow_control'):
+        if hasattr(style, "widow_control"):
             pf.widow_control = style.widow_control
 
         # 应用字体到所有 run
@@ -329,7 +326,9 @@ class DocxStyler:
                 for paragraph in cell.paragraphs:
                     # 表头使用表头字体，其余用正文字体
                     if row_idx == 0:
-                        self._apply_font_to_run_all(paragraph, ts.header_font, bold=ts.header_bold if ts.header_bold else None)
+                        self._apply_font_to_run_all(
+                            paragraph, ts.header_font, bold=ts.header_bold if ts.header_bold else None
+                        )
                         # 表头背景色
                         if ts.header_bg_color:
                             self._set_cell_shading(cell, ts.header_bg_color)
@@ -360,7 +359,7 @@ class DocxStyler:
         run.font.size = Pt(font_config.size_pt)
         run.font.bold = font_config.bold
         run.font.italic = font_config.italic
-        run.font.underline = font_config.underline if hasattr(font_config, 'underline') else False
+        run.font.underline = font_config.underline if hasattr(font_config, "underline") else False
 
         # 设置西文字体
         run.font.name = font_config.family
@@ -381,7 +380,7 @@ class DocxStyler:
         r_fonts.set(qn("w:eastAsia"), east_asia_font)
 
         # 删除线
-        if hasattr(font_config, 'strikethrough') and font_config.strikethrough:
+        if hasattr(font_config, "strikethrough") and font_config.strikethrough:
             strike = rpr.find(qn("w:strike"))
             if strike is None:
                 strike = rpr.makeelement(qn("w:strike"), {})
@@ -449,6 +448,7 @@ class DocxStyler:
         text = paragraph.text.strip()
         if text:
             from src.tools.content_pattern_matcher import classify_paragraph_role
+
             role = classify_paragraph_role(text)
             if role:
                 return role
@@ -469,9 +469,17 @@ class DocxStyler:
             是否在白名单中（不在白名单的字体记录警告）
         """
         known_fonts = {
-            "黑体", "宋体", "仿宋", "楷体", "微软雅黑",
-            "仿宋_GB2312", "楷体_GB2312", "方正小标宋简体",
-            "Times New Roman", "Arial", "Calibri",
+            "黑体",
+            "宋体",
+            "仿宋",
+            "楷体",
+            "微软雅黑",
+            "仿宋_GB2312",
+            "楷体_GB2312",
+            "方正小标宋简体",
+            "Times New Roman",
+            "Arial",
+            "Calibri",
         }
         return font_name in known_fonts
 

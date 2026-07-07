@@ -1,0 +1,11 @@
+__pycache__/
+node_modules/
+frontend/
+data/
+knowledge_data/
+logs/
+.env
+*.md
+.git/
+.qoder/
+.pytest_cache/

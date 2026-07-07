@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import uuid
 from pathlib import Path
 
@@ -32,15 +31,17 @@ async def list_kb_documents(
             docs, total = KbDocumentCRUD.list_documents(db, page=page, page_size=page_size)
             items = []
             for doc in docs:
-                items.append({
-                    "id": doc.id,
-                    "name": doc.name,
-                    "source": doc.source,
-                    "status": doc.status,
-                    "chunk_count": doc.chunk_count,
-                    "created_at": doc.created_at.isoformat() if doc.created_at else None,
-                    "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
-                })
+                items.append(
+                    {
+                        "id": doc.id,
+                        "name": doc.name,
+                        "source": doc.source,
+                        "status": doc.status,
+                        "chunk_count": doc.chunk_count,
+                        "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                    }
+                )
             return ResponseModel(
                 data=KbListResponse(
                     total=total,
@@ -138,23 +139,22 @@ async def rebuild_kb_index() -> ResponseModel:
         # 同步 DB 记录：确保 raw_docs 中的文件都有 DB 记录，并更新 chunk_count
         with get_db_session() as db:
             from src.db.models import KbDocumentModel
+
             raw_dir = Path(config.paths.raw_docs_dir)
             if raw_dir.exists():
                 # 统计每个文件的 chunk 数量
                 chunk_map = {}
-                if hasattr(retriever, 'documents'):
+                if hasattr(retriever, "documents"):
                     for doc in retriever.documents:
                         # Document 对象的 source 在 metadata 中
-                        src = doc.metadata.get('source', '') if hasattr(doc, 'metadata') else ''
+                        src = doc.metadata.get("source", "") if hasattr(doc, "metadata") else ""
                         if src:
                             # 从 source 路径提取文件名
                             src_name = Path(src).name
                             chunk_map[src_name] = chunk_map.get(src_name, 0) + 1
 
                 for f in raw_dir.glob("*.md"):
-                    existing = db.query(KbDocumentModel).filter(
-                        KbDocumentModel.source == str(f)
-                    ).first()
+                    existing = db.query(KbDocumentModel).filter(KbDocumentModel.source == str(f)).first()
                     chunk_count = chunk_map.get(f.name, 0)
                     if not existing:
                         new_doc = KbDocumentModel(
@@ -171,11 +171,13 @@ async def rebuild_kb_index() -> ResponseModel:
                 db.commit()
 
         logger.info("知识库重建完成: %d 个文档片段", doc_count)
-        return ResponseModel(data={
-            "rebuilding": True,
-            "message": f"知识库重建完成，共 {doc_count} 个文档片段",
-            "doc_count": doc_count,
-        })
+        return ResponseModel(
+            data={
+                "rebuilding": True,
+                "message": f"知识库重建完成，共 {doc_count} 个文档片段",
+                "doc_count": doc_count,
+            }
+        )
     except Exception as e:
         logger.exception("知识库重建失败")
         return ResponseModel(code=500, message=f"知识库重建失败: {e}")
@@ -192,23 +194,18 @@ async def get_kb_stats() -> ResponseModel:
             from src.db.models import KbDocumentModel
 
             total_docs = db.query(KbDocumentModel).count()
-            indexed_docs = db.query(KbDocumentModel).filter(
-                KbDocumentModel.status == "indexed"
-            ).count()
-            pending_docs = db.query(KbDocumentModel).filter(
-                KbDocumentModel.status == "pending"
-            ).count()
-            total_chunks = sum(
-                doc.chunk_count or 0
-                for doc in db.query(KbDocumentModel).all()
-            )
+            indexed_docs = db.query(KbDocumentModel).filter(KbDocumentModel.status == "indexed").count()
+            pending_docs = db.query(KbDocumentModel).filter(KbDocumentModel.status == "pending").count()
+            total_chunks = sum(doc.chunk_count or 0 for doc in db.query(KbDocumentModel).all())
 
-            return ResponseModel(data={
-                "total_docs": total_docs,
-                "indexed_docs": indexed_docs,
-                "pending_docs": pending_docs,
-                "total_chunks": total_chunks,
-            })
+            return ResponseModel(
+                data={
+                    "total_docs": total_docs,
+                    "indexed_docs": indexed_docs,
+                    "pending_docs": pending_docs,
+                    "total_chunks": total_chunks,
+                }
+            )
     except Exception as e:
         logger.exception("获取知识库统计失败")
         return ResponseModel(code=500, message=f"获取统计失败: {e}")
@@ -238,18 +235,21 @@ async def search_kb(request: KbSearchRequest) -> ResponseModel:
         results = retriever.retrieve(query)
         items = []
         for r in results[:top_k]:
-            items.append({
-                "content": r.content,
-                "source": r.source,
-                "section": r.section,
-                "score": getattr(r, "score", None),
-            })
+            items.append(
+                {
+                    "content": r.content,
+                    "source": r.source,
+                    "section": r.section,
+                    "score": getattr(r, "score", None),
+                }
+            )
 
-        return ResponseModel(data={
-            "results": items,
-            "total": len(items),
-        })
+        return ResponseModel(
+            data={
+                "results": items,
+                "total": len(items),
+            }
+        )
     except Exception as e:
         logger.exception("知识库检索失败")
         return ResponseModel(code=500, message=f"检索失败: {e}")
-

@@ -10,8 +10,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from src.utils.logger import get_logger
 
@@ -43,7 +43,9 @@ class PreviewService:
             import pypandoc
 
             html = pypandoc.convert_file(
-                str(result_path), "html", format="docx",
+                str(result_path),
+                "html",
+                format="docx",
                 extra_args=["--wrap=none", "--standalone", "--embed-resources"],
             )
             logger.info("任务 %s: DOCX→HTML 预览生成成功, %d 字符", task_id, len(html))
@@ -62,7 +64,9 @@ class PreviewService:
             import pypandoc
 
             html = pypandoc.convert_file(
-                str(docx_path), "html", format="docx",
+                str(docx_path),
+                "html",
+                format="docx",
                 extra_args=["--wrap=none", "--standalone", "--embed-resources"],
             )
             logger.info("任务 %s: MinerU DOCX→HTML 预览生成成功, %d 字符", task_id, len(html))
@@ -95,7 +99,11 @@ class PreviewService:
         return None
 
     def get_pdf_page_images(
-        self, task_id: str, dpi: int = 150, page: int = 1, page_size: int = 5,
+        self,
+        task_id: str,
+        dpi: int = 150,
+        page: int = 1,
+        page_size: int = 5,
     ) -> dict | None:
         """将原始 PDF 指定页渲染为 base64 PNG 图片（分页加载）"""
         pdf_path = self.get_original_pdf_path(task_id)
@@ -104,6 +112,7 @@ class PreviewService:
 
         try:
             import base64
+
             import fitz  # PyMuPDF
 
             doc = fitz.open(pdf_path)
@@ -125,16 +134,17 @@ class PreviewService:
                 pix = page_obj.get_pixmap(matrix=mat)
                 img_bytes = pix.tobytes("png")
                 img_b64 = base64.b64encode(img_bytes).decode("ascii")
-                pages.append({
-                    "page": i + 1,
-                    "image": f"data:image/png;base64,{img_b64}",
-                    "width": pix.width,
-                    "height": pix.height,
-                })
+                pages.append(
+                    {
+                        "page": i + 1,
+                        "image": f"data:image/png;base64,{img_b64}",
+                        "width": pix.width,
+                        "height": pix.height,
+                    }
+                )
 
             doc.close()
-            logger.info("任务 %s: PDF 转图片成功，共 %d 页，返回第 %d-%d 页",
-                        task_id, total_pages, start + 1, end)
+            logger.info("任务 %s: PDF 转图片成功，共 %d 页，返回第 %d-%d 页", task_id, total_pages, start + 1, end)
             return {"pages": pages, "total_pages": total_pages}
         except Exception as e:
             logger.error("任务 %s: PDF 转图片失败: %s", task_id, e)

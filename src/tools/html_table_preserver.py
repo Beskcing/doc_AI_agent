@@ -18,9 +18,7 @@ class HTMLTablePreserver:
     """HTML 表格占位符保护器"""
 
     # 占位符格式：使用纯文本标记，避免被 LLM 当作 HTML 注释清除
-    PLACEHOLDER_PATTERN: ClassVar[re.Pattern] = re.compile(
-        r"@@TABLE_PLACEHOLDER_(\d+)@@"
-    )
+    PLACEHOLDER_PATTERN: ClassVar[re.Pattern] = re.compile(r"@@TABLE_PLACEHOLDER_(\d+)@@")
     PLACEHOLDER_TEMPLATE: ClassVar[str] = "@@TABLE_PLACEHOLDER_{}@@"
 
     # HTML 表格匹配模式（支持嵌套表格）
@@ -78,9 +76,6 @@ class HTMLTablePreserver:
         logger.info("已恢复 %d/%d 个 HTML 表格", restored_count, len(placeholder_map))
 
         if restored_count < len(placeholder_map):
-            missing = set(placeholder_map.keys()) - set(
-                p for p in placeholder_map if p not in result
-            )
             logger.warning("有 %d 个表格占位符未在文本中找到", len(placeholder_map) - restored_count)
 
         return result

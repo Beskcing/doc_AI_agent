@@ -31,7 +31,7 @@ def setup_logging(config_path: str | Path | None = None, level: int = logging.IN
         config_path = Path(config_path)
 
     if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
         # 确保日志目录存在
         for handler in config.get("handlers", {}).values():

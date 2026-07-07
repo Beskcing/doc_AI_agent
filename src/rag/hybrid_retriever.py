@@ -8,8 +8,6 @@
 
 from __future__ import annotations
 
-import math
-
 import jieba
 from langchain_core.documents import Document
 from rank_bm25 import BM25Okapi
@@ -21,10 +19,21 @@ logger = get_logger(__name__)
 
 # 将专有名词加入 jieba 自定义词典
 _CUSTOM_TERMS = [
-    "仿宋_GB2312", "楷体_GB2312", "方正小标宋简体",
-    "OMML", "OOXML", "三线表", "版心尺寸",
-    "首行缩进", "段前间距", "段后间距", "行距倍数",
-    "GB/T", "页边距", "页眉", "页脚",
+    "仿宋_GB2312",
+    "楷体_GB2312",
+    "方正小标宋简体",
+    "OMML",
+    "OOXML",
+    "三线表",
+    "版心尺寸",
+    "首行缩进",
+    "段前间距",
+    "段后间距",
+    "行距倍数",
+    "GB/T",
+    "页边距",
+    "页眉",
+    "页脚",
 ]
 for term in _CUSTOM_TERMS:
     jieba.add_word(term)
@@ -73,7 +82,9 @@ class HybridRetriever:
 
         logger.info(
             "混合检索器初始化: %d 个文档, BM25 权重=%.2f, 向量权重=%.2f",
-            len(chunked_docs), bm25_weight, vector_weight,
+            len(chunked_docs),
+            bm25_weight,
+            vector_weight,
         )
 
     @property
@@ -113,7 +124,10 @@ class HybridRetriever:
 
         logger.info(
             "检索完成: query='%s', BM25=%d, 向量=%d, 融合=%d",
-            query[:30], len(bm25_results), len(vector_results), len(top_results),
+            query[:30],
+            len(bm25_results),
+            len(vector_results),
+            len(top_results),
         )
 
         return top_results
