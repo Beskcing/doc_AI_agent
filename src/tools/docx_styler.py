@@ -11,6 +11,7 @@ from pathlib import Path
 from docx import Document
 from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 from docx.table import Table
@@ -171,15 +172,41 @@ class DocxStyler:
             elif role == "toc":
                 self._apply_paragraph_style(paragraph, self.config.body_style)
                 paragraphs_styled += 1
+            elif role == "figure_caption":
+                # 图表标题（图1/图A.1等），优先使用 caption_style 回退到正文
+                fc_style = self.config.caption_style or self.config.body_style
+                self._apply_paragraph_style(paragraph, fc_style)
+                paragraphs_styled += 1
+            elif role == "method_heading":
+                # 方法标题（第一法/第二法等），居中
+                mh_style = (
+                    self.config.body_style.model_copy(deep=True)
+                    if hasattr(self.config.body_style, "model_copy")
+                    else self.config.body_style
+                )
+                self._apply_paragraph_style(paragraph, mh_style)
+                try:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                except Exception:
+                    pass
+                headings_styled += 1
+            elif role == "cover_marker":
+                # 封面标识行（"中华人民共和国国家标准"），使用 body_style
+                self._apply_paragraph_style(paragraph, self.config.body_style)
+                paragraphs_styled += 1
 
-        # 3. 处理表格样式
+        # 3. 后处理：图片居中和 docDefaults 注入
+        self._post_process_images(doc)
+        self._post_process_doc_defaults(doc)
+
+        # 4. 处理表格样式
         tables_styled = 0
         if self.config.table_style:
             for table in doc.tables:
                 self._apply_table_style(table)
                 tables_styled += 1
 
-        # 4. 保存
+        # 5. 保存
         try:
             doc.save(str(output_path))
             logger.info(
@@ -482,6 +509,87 @@ class DocxStyler:
             "Calibri",
         }
         return font_name in known_fonts
+
+    def _post_process_images(self, doc: Document) -> None:
+        """后处理：居中所有图片段落
+
+        遍历文档中所有包含图片的段落，将其对齐方式设为居中。
+        """
+        count = 0
+        for paragraph in doc.paragraphs:
+            # 检查段落是否包含图片
+            images = paragraph._element.xpath(".//pic:pic")
+            if images:
+                pPr = paragraph._element.find(qn("w:pPr"))
+                if pPr is None:
+                    pPr = OxmlElement("w:pPr")
+                    paragraph._element.insert(0, pPr)
+                jc = pPr.find(qn("w:jc"))
+                if jc is None:
+                    jc = OxmlElement("w:jc")
+                    pPr.append(jc)
+                jc.set(qn("w:val"), "center")
+                count += 1
+        if count > 0:
+            logger.debug("后处理：居中 %d 个图片段落", count)
+
+    def _post_process_doc_defaults(self, doc: Document) -> None:
+        """后处理：注入文档默认字体（docDefaults）
+
+        在 styles.xml 的 <w:docDefaults> 中设置默认中西文字体，
+        确保未被显式格式化的文本使用国标默认字体。
+        """
+        styles_elem = doc.styles.element
+        doc_defaults = styles_elem.find(qn("w:docDefaults"))
+        if doc_defaults is None:
+            doc_defaults = OxmlElement("w:docDefaults")
+            styles_elem.insert(0, doc_defaults)
+
+        # rPrDefault
+        rpr_default = doc_defaults.find(qn("w:rPrDefault"))
+        if rpr_default is None:
+            rpr_default = OxmlElement("w:rPrDefault")
+            doc_defaults.insert(0, rpr_default)
+
+        rPr = rpr_default.find(qn("w:rPr"))
+        if rPr is None:
+            rPr = OxmlElement("w:rPr")
+            rpr_default.append(rPr)
+
+        # 设置默认字体（使用 body_style 的字体配置）
+        body_font = self.config.body_style.font
+        rFonts = rPr.find(qn("w:rFonts"))
+        if rFonts is None:
+            rFonts = OxmlElement("w:rFonts")
+            rPr.insert(0, rFonts)
+        rFonts.set(qn("w:ascii"), body_font.family)
+        rFonts.set(qn("w:hAnsi"), body_font.family)
+        rFonts.set(qn("w:cs"), body_font.family)
+        east_asia = body_font.east_asia_family or body_font.family
+        rFonts.set(qn("w:eastAsia"), east_asia)
+
+        # 移除主题引用
+        for attr in ("w:asciiTheme", "w:eastAsiaTheme", "w:hAnsiTheme", "w:cstheme"):
+            try:
+                del rFonts.attrib[qn(attr)]
+            except KeyError:
+                pass
+
+        # 默认字号
+        half_pt = int(round(body_font.size_pt * 2))
+        sz = rPr.find(qn("w:sz"))
+        if sz is None:
+            sz = OxmlElement("w:sz")
+            rPr.append(sz)
+        sz.set(qn("w:val"), str(half_pt))
+
+        szCs = rPr.find(qn("w:szCs"))
+        if szCs is None:
+            szCs = OxmlElement("w:szCs")
+            rPr.append(szCs)
+        szCs.set(qn("w:val"), str(half_pt))
+
+        logger.debug("后处理：已注入 docDefaults (字体: %s/%s, %.1fpt)", body_font.family, east_asia, body_font.size_pt)
 
     def _set_cell_margins(self, cell, padding_pt: float) -> None:
         """设置表格单元格内边距（向后兼容）

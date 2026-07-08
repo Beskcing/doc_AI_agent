@@ -224,9 +224,17 @@ def _review_content(
     try:
         context = IntentAnalysis.model_validate(intent)
         result = cleaner.clean(raw_markdown, context)
+        cleaned_md = result.cleaned_markdown
+
+        # 内容规整：日期合并、拆分标题合并、TOC删除、双空格修正
+        from src.tools.content_normalizer import ContentNormalizer
+
+        normalizer = ContentNormalizer()
+        cleaned_md = normalizer.normalize(cleaned_md)
+
         return {
-            "cleaned_markdown": result.cleaned_markdown,
-            "cleaning_log": result.changes_log,
+            "cleaned_markdown": cleaned_md,
+            "cleaning_log": result.changes_log + normalizer.changes,
         }
     except Exception as e:
         logger.error("[review_content] 清洗失败: %s", e)

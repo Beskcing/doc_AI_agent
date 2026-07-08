@@ -39,6 +39,33 @@ APPENDIX_CLAUSE_PATTERNS: list[tuple[int, re.Pattern]] = [
 # 表格标题模式（表B.1 / 表1 等）
 TABLE_CAPTION_PATTERN: re.Pattern = re.compile(r"^表\s*[A-Z]?\.?\d+")
 
+# 图表标题模式（图1 / 图A.1 等）
+FIGURE_CAPTION_PATTERN: re.Pattern = re.compile(r"^图\s*\d+")
+
+# 方法标题模式（第一法 / 第二法等）
+METHOD_HEADING_PATTERN: re.Pattern = re.compile(r"^第[一二三四五六七八九十百]+法\s")
+
+# 公式模式（LaTeX 或简单公式）
+FORMULA_PATTERNS: list[re.Pattern] = [
+    re.compile(r"^\$\$"),
+    re.compile(r"^[A-Za-z]\s*=\s*"),
+]
+
+# 封面标识行
+COVER_MARKER_PATTERN: re.Pattern = re.compile(r"中华人民共和国国家标准")
+
+# 国标编号行（GB/T xxxx, GB xxxx 等）
+GB_CODE_PATTERN: re.Pattern = re.compile(r"^GB[/T\s]*\d")
+
+# 日期行（含"发布"或"实施"）
+DATE_LINE_PATTERN: re.Pattern = re.compile(r"(\d{4}[-/]\d{2}[-/]\d{2}|发布|实施)")
+
+# 前言标题模式
+PREFACE_TITLE_PATTERN: re.Pattern = re.compile(r"^(前\s*言|引\s*言)$")
+
+# 正文标题模式（在 chapter 1 之前的文档标准名称行，如"橄榄油、油橄榄果渣油"）
+BODY_TITLE_PATTERN: re.Pattern = re.compile(r"^[\u4e00-\u9fff][\u4e00-\u9fff、，,\s]+")
+
 
 def classify_paragraph_role(text: str) -> str | None:
     """根据文本内容判断段落角色
@@ -75,6 +102,18 @@ def classify_paragraph_role(text: str) -> str | None:
     # 表格标题
     if TABLE_CAPTION_PATTERN.match(text):
         return "table_caption"
+
+    # 图表标题
+    if FIGURE_CAPTION_PATTERN.match(text):
+        return "figure_caption"
+
+    # 方法标题（第X法）
+    if METHOD_HEADING_PATTERN.match(text):
+        return "method_heading"
+
+    # 封面标识行
+    if COVER_MARKER_PATTERN.search(text):
+        return "cover_marker"
 
     # 特殊标题（前言、引言等）
     for pattern in SPECIAL_HEADING_PATTERNS:

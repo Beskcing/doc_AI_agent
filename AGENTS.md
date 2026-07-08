@@ -15,7 +15,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 ## 关键路径
 - 工作流：`src/workflows/doc_formatting_graph.py` | LLM 封装：`src/llm_client.py`
-- 工具链：`src/tools/` (mineru_parser, pandoc_converter, docx_styler, markdown_cleaner, html_table_preserver)
+- 工具链：`src/tools/` (mineru_parser, pandoc_converter, docx_styler, markdown_cleaner, html_table_preserver, content_normalizer, content_pattern_matcher)
 - RAG：`src/rag/` | API：`src/api/` | DB：`src/db/` | 前端：`frontend/`
 - 提示词：`prompts/` | 配置：`configs/settings.yaml` | 架构文档：`docs/ARCHITECTURE.md`
 
@@ -52,6 +52,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-07 | feat | 工程化P2: Ruff lint全通过+pre-commit hooks+全局异常处理+Dockerfile |
 | 2026-07-07 | feat | 工程化P3: GitHub Actions CI+限流中间件+Makefile |
 | 2026-07-07 | feat | Docker多阶段构建+前端编译+python:3.12-slim+pandoc+docker-compose一键启动+后端SPA静态文件挂载 |
+| 2026-07-08 | feat | gbt技能内联：新增content_normalizer(日期合并/标题合并/TOC删除/双空格)+DocxStyler增强(图片居中/docDefaults/新角色) |
 | 2026-07-07 | config | LLM Provider从Qwen切换为智谱AI(GLM-4)，默认模型glm-4 |
 | 2026-07-07 | fix | 对话LLM失败时自动回滚孤立用户消息，ChatMessageCRUD新增delete方法 |
 | 2026-07-07 | feat | html_to_pipe支持colspan/rowspan合并单元格 |

@@ -269,6 +269,19 @@ class PipelineService:
         cleaner = MarkdownCleaner(llm_client=self.deps.get_llm_client(), base_dir=extract_dir)
         result = cleaner.clean(markdown_content, context=intent)
         cleaned = result.cleaned_markdown
+
+        # 内容规整：日期合并、拆分标题合并、TOC删除、双空格修正
+        from src.tools.content_normalizer import ContentNormalizer
+
+        normalizer = ContentNormalizer()
+        cleaned = normalizer.normalize(cleaned)
+        logger.info(
+            "任务 %s: 内容规整完成, %d 处更改: %s",
+            task_id,
+            len(normalizer.changes),
+            normalizer.changes[:5],
+        )
+
         cleaned = convert_html_tables_in_markdown(cleaned)
         logger.info(
             "任务 %s: Markdown 清洗完成, %d 处修改, %d 个缺失图片",
