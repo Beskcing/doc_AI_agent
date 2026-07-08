@@ -66,6 +66,7 @@ class MinerUParser:
         """
         try:
             import magic_pdf  # noqa: F401
+
             return True
         except ImportError:
             logger.warning("MinerU (magic-pdf) 未安装，仅支持 online 模式或从已有 Markdown 加载")
@@ -187,6 +188,7 @@ class MinerUParser:
         保持相对路径不变（Pandoc 通过 --resource-path 解析），
         仅校验图片文件是否存在，失效路径替换为占位符。
         """
+
         def replace_md_img(match: re.Match) -> str:
             alt = match.group(1)
             path = match.group(2)

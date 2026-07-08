@@ -12,12 +12,16 @@ import json
 import re
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.api.services.service_deps import ServiceDeps
 from src.db.session import get_db_session
 from src.models.document_schema import IntentAnalysis
 from src.utils.json_validator import safe_parse_llm_json
 from src.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from src.tools.formatters.base import BaseDocxFormatter
 
 logger = get_logger(__name__)
 
@@ -90,19 +94,30 @@ class PipelineService:
         intent = self._analyze_intent(task_id, markdown_content, target_standard)
 
         # ── 阶段 1.6: 自动匹配模板 ──
+        # 注意：如目标标准已有注册 Formatter，跳过模板匹配，直接使用 Formatter
         if not template_id and intent.detected_standard:
-            matched = self._auto_match_template(intent.detected_standard)
-            if matched:
-                template_id = matched["id"]
-                logger.info("任务 %s: 自动匹配模板: %s (%s)", task_id, matched["name"], template_id)
-                with get_db_session() as db:
-                    from src.db.crud import TaskCRUD
+            registry_key = self._standard_to_registry_key(intent.detected_standard)
+            from src.tools.formatters.registry import is_registered
 
-                    task_db = TaskCRUD.get(db, task_id)
-                    if task_db:
-                        new_config = {**(task_db.config or {}), "auto_matched_template": matched}
-                        task_db.config = new_config
-                        db.commit()
+            if not is_registered(registry_key):
+                matched = self._auto_match_template(intent.detected_standard)
+                if matched:
+                    template_id = matched["id"]
+                    logger.info("任务 %s: 自动匹配模板: %s (%s)", task_id, matched["name"], template_id)
+                    with get_db_session() as db:
+                        from src.db.crud import TaskCRUD
+
+                        task_db = TaskCRUD.get(db, task_id)
+                        if task_db:
+                            new_config = {**(task_db.config or {}), "auto_matched_template": matched}
+                            task_db.config = new_config
+                            db.commit()
+            else:
+                logger.info(
+                    "任务 %s: 标准 %s 已注册 Formatter，跳过模板匹配",
+                    task_id,
+                    intent.detected_standard,
+                )
 
         # ── 阶段 2: Markdown 清洗 ──
         self._update_status(task_id, "processing", progress=20, current_step="review_content")
@@ -132,18 +147,57 @@ class PipelineService:
 
         # ── 阶段 3: 确定基础 DOCX ──
         self._update_status(task_id, "processing", progress=40, current_step="prepare_docx")
+        applied_format: dict = {"source": "llm"}
         if mineru_docx_path and Path(mineru_docx_path).exists():
             docx_path = mineru_docx_path
 
             if not template_id:
-                # 无模板 + MinerU DOCX → GbtDocxFormatter 硬编码 GB/T 1.1 规范
-                # 跳过 LLM style_config，直接使用正确的国标格式
-                logger.info("任务 %s: 使用 GbtDocxFormatter (GB/T 1.1 硬编码规范)", task_id)
-                style_config = self._default_style_config()
-                styled_path = self._apply_gbt_format(task_id, docx_path)
+                # 无模板 + MinerU DOCX → 查询注册表
+                formatter = self._resolve_formatter(intent.detected_standard)
+                if formatter is not None:
+                    logger.info(
+                        "任务 %s: 使用注册 Formatter: %s (%s)",
+                        task_id,
+                        formatter.display_name,
+                        formatter.standard_id,
+                    )
+                    style_config = self._default_style_config()
+                    styled_path = self._apply_registered_formatter(task_id, docx_path, formatter)
+                    applied_format = {
+                        "source": "formatter",
+                        "name": formatter.display_name,
+                        "id": formatter.standard_id,
+                    }
+                else:
+                    # 无注册 Formatter → DocxNormalizer + DocxStyler
+                    logger.info("任务 %s: 无注册 Formatter，降级使用 DocxStyler", task_id)
+                    from src.tools.docx_normalizer import DocxNormalizer
+
+                    normalizer = DocxNormalizer()
+                    normalized_path = str(result_dir / "normalized.docx")
+                    docx_path = normalizer.normalize(docx_path, normalized_path)
+                    logger.info(
+                        "任务 %s: DOCX 内容规整完成, %d 处更改",
+                        task_id,
+                        len(normalizer.changes),
+                    )
+                    self._update_status(task_id, "processing", progress=70, current_step="apply_style")
+                    styled_path = self._apply_style(task_id, docx_path, style_config)
             else:
                 # 有模板 → DocxNormalizer + DocxStyler
                 logger.info("任务 %s: 使用 MinerU 原始 DOCX + 模板样式", task_id)
+                from src.db.crud import StyleTemplateCRUD
+
+                with get_db_session() as db:
+                    tmpl = StyleTemplateCRUD.get(db, template_id)
+                    if tmpl:
+                        applied_format = {
+                            "source": "template",
+                            "name": tmpl.name,
+                            "id": tmpl.id,
+                            "standard": tmpl.standard,
+                        }
+
                 from src.tools.docx_normalizer import DocxNormalizer
 
                 normalizer = DocxNormalizer()
@@ -164,6 +218,7 @@ class PipelineService:
 
         # ── 阶段 5: 最终化 ──
         self._update_status(task_id, "processing", progress=90, current_step="finalize")
+
         with get_db_session() as db:
             from src.db.crud import TaskCRUD
 
@@ -171,6 +226,8 @@ class PipelineService:
             if task_db:
                 task_db.style_config_preview = style_config
                 task_db.result_path = styled_path
+                new_config = {**(task_db.config or {}), "applied_format": applied_format}
+                task_db.config = new_config
                 db.commit()
 
         return cleaned_markdown, styled_path, mineru_docx_path, style_config
@@ -497,44 +554,91 @@ class PipelineService:
         logger.info("任务 %s: 样式应用完成 → %s", task_id, styled_path)
         return str(styled_path)
 
-    def _apply_gbt_format(self, task_id: str, docx_path: str) -> str:
-        """使用 GbtDocxFormatter 硬编码 GB/T 1.1 规范格式化 DOCX
+    @staticmethod
+    def _standard_to_registry_key(standard: str) -> str:
+        """将标准号转换为注册表 key 格式
 
-        替代 LLM+RAG 生成的 style_config 路径，直接使用正确的国标格式值。
-        内部完成：页面设置 → 内容规整 → 段落分类 → 格式应用 → 表格/图片处理。
+        Examples:
+            "GB/T 1.1" → "gbt_1_1"
+            "GB/T 9704" → "gbt_9704"
+            "GB 5009.225" → "gb_5009_225"
+        """
+        key = standard.lower().replace("/", "").replace(" ", "_").replace("-", "_").replace(".", "_")
+        while "__" in key:
+            key = key.replace("__", "_")
+        return key.strip("_")
+
+    def _resolve_formatter(self, standard: str | None) -> BaseDocxFormatter | None:
+        """根据标准号查找注册的 Formatter 实例
+
+        Returns:
+            Formatter 实例，或 None（未注册或 standard 为空）
+        """
+        if not standard:
+            return None
+        from src.tools.formatters.registry import get_formatter
+
+        registry_key = self._standard_to_registry_key(standard)
+        formatter_cls = get_formatter(registry_key)
+        if formatter_cls is not None:
+            return formatter_cls()
+        return None
+
+    def _apply_registered_formatter(self, task_id: str, docx_path: str, formatter: BaseDocxFormatter) -> str:
+        """使用注册的 Formatter 格式化 DOCX
+
+        替代原 _apply_gbt_format，支持任意已注册的 BaseDocxFormatter。
 
         Args:
             task_id: 任务 ID
-            docx_path: 输入 DOCX 路径（MinerU 原始 DOCX）
+            docx_path: 输入 DOCX 路径
+            formatter: 已注册的 Formatter 实例
 
         Returns:
             输出 DOCX 路径
         """
-        from src.tools.gbt_docx_formatter import GbtDocxFormatter
-
         result_dir = Path("data/output") / task_id
         styled_path = result_dir / "formatted_styled.docx"
 
-        self._update_status(task_id, "processing", progress=50, current_step="gbt_format")
-        formatter = GbtDocxFormatter()
+        self._update_status(task_id, "processing", progress=50, current_step="formatter")
         report = formatter.process(docx_path, str(styled_path))
 
         if not report.success:
-            logger.warning("任务 %s: GBT 格式应用部分失败: %s", task_id, report.warnings)
+            logger.warning("任务 %s: Formatter(%s) 部分失败: %s", task_id, formatter.display_name, report.warnings)
             import shutil
 
             shutil.copy(docx_path, styled_path)
             logger.info("任务 %s: 回退到原始输出", task_id)
 
         logger.info(
-            "任务 %s: GBT 格式化完成 → %s (段落=%d, 标题=%d, 表格=%d)",
+            "任务 %s: Formatter(%s) 完成 → %s (段落=%d, 标题=%d, 表格=%d)",
             task_id,
+            formatter.display_name,
             styled_path,
             report.paragraphs_styled,
             report.headings_styled,
             report.tables_styled,
         )
         return str(styled_path)
+
+    # 向后兼容：保留旧方法名，内部委托到注册表
+    def _apply_gbt_format(self, task_id: str, docx_path: str) -> str:
+        """向后兼容：使用 GB/T 1.1 Formatter 格式化
+
+        已废弃：请使用 _apply_registered_formatter + _resolve_formatter。
+        保留此方法以避免破坏现有调用。
+        """
+        from src.tools.formatters.registry import get_formatter
+
+        formatter_cls = get_formatter("gbt_1.1")
+        if formatter_cls is None:
+            # 降级：直接导入（兼容未注册场景）
+            from src.tools.formatters.gbt_1_1 import GbtDocxFormatter
+
+            formatter = GbtDocxFormatter()
+        else:
+            formatter = formatter_cls()
+        return self._apply_registered_formatter(task_id, docx_path, formatter)
 
     def apply_template_to_task(
         self,

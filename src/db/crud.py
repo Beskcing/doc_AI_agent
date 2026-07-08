@@ -196,34 +196,60 @@ class StyleTemplateCRUD:
 
     @staticmethod
     def match_by_standard(db: Session, standard: str) -> StyleTemplateModel | None:
-        """根据标准号自动匹配模板
+        """根据标准号自动匹配模板（三级策略）
 
-        策略：
-        1. 从标准号提取关键词（如 GB/T 14454.13 → 14454）
-        2. 在模板名称中搜索匹配的关键词
-        3. 返回最近创建的匹配模板
+        优先级从高到低：
+        1. 精确匹配：templates.standard 字段 = 检测到的标准号
+        2. 模糊匹配：templates.standard 字段包含标准号中的数字关键词
+        3. 名称匹配（降级）：templates.name 字段包含标准号数字关键词
+
+        同时优先返回 standard 字段非空的模板（显式绑定 > 隐式推断）。
         """
         import re
 
-        # 从标准号提取数字关键词
+        if not standard:
+            return None
+
+        # 提取数字关键词（如 GB/T 14454.13 → 14454）
         numbers = re.findall(r"\d+", standard)
-        if not numbers:
-            return None
+        keyword = max(numbers, key=len) if numbers else ""
 
-        # 使用最长的数字串作为关键词
-        keyword = max(numbers, key=len)
-        if len(keyword) < 3:
-            return None
-
-        # 在模板名称中搜索
-        templates = (
+        # 策略 1: 精确匹配 standard 字段
+        template = (
             db.query(StyleTemplateModel)
-            .filter(StyleTemplateModel.name.like(f"%{keyword}%"))
+            .filter(StyleTemplateModel.standard == standard)
             .order_by(StyleTemplateModel.created_at.desc())
-            .all()
+            .first()
         )
+        if template:
+            return template
 
-        return templates[0] if templates else None
+        # 策略 2: 模糊匹配 standard 字段（standard 包含数字关键词）
+        if keyword and len(keyword) >= 3:
+            template = (
+                db.query(StyleTemplateModel)
+                .filter(
+                    StyleTemplateModel.standard.isnot(None),
+                    StyleTemplateModel.standard.like(f"%{keyword}%"),
+                )
+                .order_by(StyleTemplateModel.created_at.desc())
+                .first()
+            )
+            if template:
+                return template
+
+        # 策略 3: 降级为模板名称关键词搜索
+        if keyword and len(keyword) >= 3:
+            template = (
+                db.query(StyleTemplateModel)
+                .filter(StyleTemplateModel.name.like(f"%{keyword}%"))
+                .order_by(StyleTemplateModel.created_at.desc())
+                .first()
+            )
+            if template:
+                return template
+
+        return None
 
 
 class SystemConfigCRUD:

@@ -29,20 +29,20 @@ MINERU_API_BASE = "https://mineru.net"
 class MinerUTaskState(str, Enum):
     """MinerU 任务状态"""
 
-    PENDING = "pending"          # 排队中
-    RUNNING = "running"          # 正在解析
-    CONVERTING = "converting"    # 格式转换中
-    DONE = "done"                # 完成
-    FAILED = "failed"            # 失败
+    PENDING = "pending"  # 排队中
+    RUNNING = "running"  # 正在解析
+    CONVERTING = "converting"  # 格式转换中
+    DONE = "done"  # 完成
+    FAILED = "failed"  # 失败
     WAITING_FILE = "waiting-file"  # 等待文件上传（批量上传模式）
 
 
 class MinerUModelVersion(str, Enum):
     """MinerU 模型版本"""
 
-    PIPELINE = "pipeline"      # 默认管道模型
-    VLM = "vlm"                # 视觉语言模型（推荐）
-    HTML = "MinerU-HTML"       # HTML 专用
+    PIPELINE = "pipeline"  # 默认管道模型
+    VLM = "vlm"  # 视觉语言模型（推荐）
+    HTML = "MinerU-HTML"  # HTML 专用
 
 
 class MinerUAPIClient:

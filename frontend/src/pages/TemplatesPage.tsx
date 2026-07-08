@@ -44,6 +44,7 @@ interface TemplateItem {
   id: string
   name: string
   description: string | null
+  standard: string | null
   style_config: Record<string, unknown>
   source_docx_path: string | null
   created_at: string
@@ -62,6 +63,7 @@ const TemplatesPage: React.FC = () => {
   const [extractedConfig, setExtractedConfig] = useState<Record<string, unknown> | null>(null)
   const [extractedDocxPath, setExtractedDocxPath] = useState('')
   const [extractedFilename, setExtractedFilename] = useState('')
+  const [inferredStandard, setInferredStandard] = useState<string | null>(null)
   const [createModalVisible, setCreateModalVisible] = useState(false)
   const [createForm] = Form.useForm()
 
@@ -104,10 +106,12 @@ const TemplatesPage: React.FC = () => {
       setExtractedConfig(data.style_config)
       setExtractedDocxPath(data.source_docx_path || '')
       setExtractedFilename(data.filename || file.name)
+      setInferredStandard(data.inferred_standard || null)
       setCreateModalVisible(true)
       createForm.setFieldsValue({
         name: data.filename ? data.filename.replace(/\.docx$/i, '') : '',
         description: `从 ${file.name} 提取的排版模板`,
+        standard: data.inferred_standard || '',
       })
       message.success('样式提取成功，请填写模板信息保存')
     } catch (err) {
@@ -130,12 +134,14 @@ const TemplatesPage: React.FC = () => {
         name: values.name,
         style_config: extractedConfig,
         description: values.description,
+        standard: values.standard || inferredStandard || undefined,
         source_docx_path: extractedDocxPath || undefined,
       })
       message.success('模板保存成功')
       setCreateModalVisible(false)
       setExtractedConfig(null)
       setExtractedDocxPath('')
+      setInferredStandard(null)
       createForm.resetFields()
       fetchTemplates()
     } catch (err) {
@@ -152,6 +158,7 @@ const TemplatesPage: React.FC = () => {
     editForm.setFieldsValue({
       name: template.name,
       description: template.description || '',
+      standard: template.standard || '',
     })
     setEditModalVisible(true)
   }
@@ -177,6 +184,7 @@ const TemplatesPage: React.FC = () => {
       await updateTemplate(editingTemplate.id, {
         name: values.name,
         description: values.description,
+        standard: values.standard || undefined,
         style_config: parsedConfig!,
       })
       message.success('模板更新成功')
@@ -214,6 +222,14 @@ const TemplatesPage: React.FC = () => {
       key: 'name',
       ellipsis: true,
       render: (name: string) => <Text strong>{name}</Text>,
+    },
+    {
+      title: '关联标准',
+      dataIndex: 'standard',
+      key: 'standard',
+      width: 160,
+      render: (std: string | null) =>
+        std ? <Tag color="blue">{std}</Tag> : <Text type="secondary">-</Text>,
     },
     {
       title: '描述',
@@ -335,6 +351,112 @@ const TemplatesPage: React.FC = () => {
       }
       setEditStyleConfig(newConfig)
       setEditJsonText(JSON.stringify(newConfig, null, 2))
+    }
+
+    // 渲染段落样式区域（用于封面/前言/附录等 ParagraphStyleConfig 类型字段）
+    const renderParagraphSectionEditor = (sectionKey: string, label: string, tagColor: string) => {
+      const sectionData = editStyleConfig[sectionKey] as Record<string, unknown> | undefined
+      const sFont = sectionData?.font as Record<string, unknown> | undefined
+
+      const upsertSection = (init?: boolean) => {
+        if (init && !sectionData) {
+          const defaults = {
+            font: { family: 'Times New Roman', east_asia_family: '宋体', size_pt: 14, bold: true },
+            alignment: 'center',
+            line_spacing: 1.0,
+            first_line_indent_chars: 0,
+          }
+          const newConfig = { ...editStyleConfig, [sectionKey]: defaults }
+          setEditStyleConfig(newConfig)
+          setEditJsonText(JSON.stringify(newConfig, null, 2))
+        }
+      }
+
+      if (!sectionData) {
+        return (
+          <Row gutter={8} style={{ marginBottom: 8 }}>
+            <Col span={6}>
+              <Tag color={tagColor}>{label}</Tag>
+            </Col>
+            <Col span={18}>
+              <Button size="small" type="dashed" onClick={() => upsertSection(true)}>
+                + 添加{label}样式
+              </Button>
+            </Col>
+          </Row>
+        )
+      }
+
+      const updateSectionFont = (field: string, value: unknown) => {
+        const newConfig = {
+          ...editStyleConfig,
+          [sectionKey]: { ...sectionData, font: { ...sFont, [field]: value } },
+        }
+        setEditStyleConfig(newConfig)
+        setEditJsonText(JSON.stringify(newConfig, null, 2))
+      }
+      const updateSection = (field: string, value: unknown) => {
+        const newConfig = { ...editStyleConfig, [sectionKey]: { ...sectionData, [field]: value } }
+        setEditStyleConfig(newConfig)
+        setEditJsonText(JSON.stringify(newConfig, null, 2))
+      }
+      const removeSection = () => {
+        const newConfig = { ...editStyleConfig }
+        delete newConfig[sectionKey]
+        setEditStyleConfig(newConfig)
+        setEditJsonText(JSON.stringify(newConfig, null, 2))
+      }
+
+      return (
+        <Row gutter={8} style={{ marginBottom: 8 }}>
+          <Col span={4}>
+            <Tag color={tagColor}>{label}</Tag>
+          </Col>
+          <Col span={6}>
+            <Input
+              size="small"
+              value={String(sFont?.east_asia_family || sFont?.family || '')}
+              onChange={e => updateSectionFont('east_asia_family', e.target.value)}
+              placeholder="字体"
+            />
+          </Col>
+          <Col span={3}>
+            <InputNumber
+              size="small"
+              style={{ width: '100%' }}
+              value={sFont?.size_pt as number}
+              step={0.5}
+              onChange={v => updateSectionFont('size_pt', v)}
+              placeholder="字号"
+            />
+          </Col>
+          <Col span={3}>
+            <Select
+              size="small"
+              style={{ width: '100%' }}
+              value={sFont?.bold ? 'bold' : 'normal'}
+              onChange={v => updateSectionFont('bold', v === 'bold')}
+              options={[{ value: 'normal', label: '常规' }, { value: 'bold', label: '加粗' }]}
+            />
+          </Col>
+          <Col span={4}>
+            <Select
+              size="small"
+              style={{ width: '100%' }}
+              value={String(sectionData?.alignment || 'center')}
+              onChange={v => updateSection('alignment', v)}
+              options={[
+                { value: 'left', label: '左' },
+                { value: 'center', label: '居中' },
+                { value: 'justify', label: '两端' },
+              ]}
+            />
+          </Col>
+          <Col span={4}>
+            <Button size="small" danger type="link" onClick={removeSection}>移除</Button>
+          </Col>
+        </Row>
+      )
     }
 
     return (
@@ -466,6 +588,271 @@ const TemplatesPage: React.FC = () => {
           </Row>
         </Collapse.Panel>
 
+        <Collapse.Panel header="段落格式" key="paragraph">
+          <Row gutter={8}>
+            <Col span={8}>
+              <Text type="secondary">行距类型</Text>
+              <Select
+                size="small"
+                style={{ width: '100%' }}
+                value={String(bs?.line_spacing_rule || 'multiple')}
+                onChange={v => updateField('body_style', 'line_spacing_rule', v)}
+                options={[
+                  { value: 'multiple', label: '倍数行距' },
+                  { value: 'exact', label: '固定行距' },
+                  { value: 'at_least', label: '最小行距' },
+                ]}
+              />
+            </Col>
+            <Col span={8}>
+              <Text type="secondary">固定行距(pt)</Text>
+              <InputNumber
+                value={bs?.line_spacing_pt as number}
+                style={{ width: '100%' }}
+                size="small"
+                step={0.5}
+                onChange={v => updateField('body_style', 'line_spacing_pt', v)}
+                placeholder={bs?.line_spacing_rule === 'exact' ? '如 20' : '可选'}
+              />
+            </Col>
+            <Col span={8}>
+              <Text type="secondary">段前间距(pt)</Text>
+              <InputNumber
+                value={bs?.space_before_pt as number}
+                style={{ width: '100%' }}
+                size="small"
+                step={1}
+                onChange={v => updateField('body_style', 'space_before_pt', v)}
+              />
+            </Col>
+          </Row>
+          <Row gutter={8} style={{ marginTop: 8 }}>
+            <Col span={8}>
+              <Text type="secondary">段后间距(pt)</Text>
+              <InputNumber
+                value={bs?.space_after_pt as number}
+                style={{ width: '100%' }}
+                size="small"
+                step={1}
+                onChange={v => updateField('body_style', 'space_after_pt', v)}
+              />
+            </Col>
+            <Col span={8}>
+              <Text type="secondary">左缩进(cm)</Text>
+              <InputNumber
+                value={bs?.left_indent_cm as number}
+                style={{ width: '100%' }}
+                size="small"
+                step={0.1}
+                onChange={v => updateField('body_style', 'left_indent_cm', v)}
+              />
+            </Col>
+            <Col span={8}>
+              <Text type="secondary">右缩进(cm)</Text>
+              <InputNumber
+                value={bs?.right_indent_cm as number}
+                style={{ width: '100%' }}
+                size="small"
+                step={0.1}
+                onChange={v => updateField('body_style', 'right_indent_cm', v)}
+              />
+            </Col>
+          </Row>
+          <Row gutter={8} style={{ marginTop: 8 }}>
+            <Col span={8}>
+              <Text type="secondary">段中不分页</Text>
+              <Select
+                size="small"
+                style={{ width: '100%' }}
+                value={bs?.keep_together ? 'yes' : 'no'}
+                onChange={v => updateField('body_style', 'keep_together', v === 'yes')}
+                options={[{ value: 'no', label: '否' }, { value: 'yes', label: '是' }]}
+              />
+            </Col>
+            <Col span={8}>
+              <Text type="secondary">与下段同页</Text>
+              <Select
+                size="small"
+                style={{ width: '100%' }}
+                value={bs?.keep_with_next ? 'yes' : 'no'}
+                onChange={v => updateField('body_style', 'keep_with_next', v === 'yes')}
+                options={[{ value: 'no', label: '否' }, { value: 'yes', label: '是' }]}
+              />
+            </Col>
+            <Col span={8}>
+              <Text type="secondary">孤行控制</Text>
+              <Select
+                size="small"
+                style={{ width: '100%' }}
+                value={bs?.widow_control !== false ? 'yes' : 'no'}
+                onChange={v => updateField('body_style', 'widow_control', v === 'yes')}
+                options={[{ value: 'yes', label: '开启' }, { value: 'no', label: '关闭' }]}
+              />
+            </Col>
+          </Row>
+        </Collapse.Panel>
+
+        <Collapse.Panel header="标题样式" key="headings">
+          {(editStyleConfig.heading_styles as Array<Record<string, unknown>> | undefined)
+            ?.map((hs, idx) => {
+              const hFont = hs?.font as Record<string, unknown> | undefined
+              return (
+                <Row key={idx} gutter={8} style={{ marginBottom: 8 }}>
+                  <Col span={2}>
+                    <Tag>{String(hs?.level || (idx + 1))}级</Tag>
+                  </Col>
+                  <Col span={8}>
+                    <Input
+                      size="small"
+                      value={String(hFont?.east_asia_family || hFont?.family || '')}
+                      onChange={e => {
+                        const list = [...(editStyleConfig.heading_styles as Array<Record<string, unknown>>)]
+                        list[idx] = { ...list[idx], font: { ...(list[idx].font as object || {}), east_asia_family: e.target.value } }
+                        const newConfig = { ...editStyleConfig, heading_styles: list }
+                        setEditStyleConfig(newConfig)
+                        setEditJsonText(JSON.stringify(newConfig, null, 2))
+                      }}
+                      placeholder="字体"
+                    />
+                  </Col>
+                  <Col span={3}>
+                    <InputNumber
+                      size="small"
+                      style={{ width: '100%' }}
+                      value={hFont?.size_pt as number}
+                      step={0.5}
+                      onChange={v => {
+                        const list = [...(editStyleConfig.heading_styles as Array<Record<string, unknown>>)]
+                        list[idx] = { ...list[idx], font: { ...(list[idx].font as object || {}), size_pt: v } }
+                        const newConfig = { ...editStyleConfig, heading_styles: list }
+                        setEditStyleConfig(newConfig)
+                        setEditJsonText(JSON.stringify(newConfig, null, 2))
+                      }}
+                      placeholder="字号"
+                    />
+                  </Col>
+                  <Col span={4}>
+                    <Select
+                      size="small"
+                      style={{ width: '100%' }}
+                      value={hFont?.bold ? 'bold' : 'normal'}
+                      onChange={v => {
+                        const list = [...(editStyleConfig.heading_styles as Array<Record<string, unknown>>)]
+                        list[idx] = { ...list[idx], font: { ...(list[idx].font as object || {}), bold: v === 'bold' } }
+                        const newConfig = { ...editStyleConfig, heading_styles: list }
+                        setEditStyleConfig(newConfig)
+                        setEditJsonText(JSON.stringify(newConfig, null, 2))
+                      }}
+                      options={[{ value: 'normal', label: '常规' }, { value: 'bold', label: '加粗' }]}
+                    />
+                  </Col>
+                  <Col span={4}>
+                    <Select
+                      size="small"
+                      style={{ width: '100%' }}
+                      value={String(hs?.alignment || 'center')}
+                      onChange={v => {
+                        const list = [...(editStyleConfig.heading_styles as Array<Record<string, unknown>>)]
+                        list[idx] = { ...list[idx], alignment: v }
+                        const newConfig = { ...editStyleConfig, heading_styles: list }
+                        setEditStyleConfig(newConfig)
+                        setEditJsonText(JSON.stringify(newConfig, null, 2))
+                      }}
+                      options={[
+                        { value: 'left', label: '左' },
+                        { value: 'center', label: '居中' },
+                        { value: 'justify', label: '两端' },
+                      ]}
+                    />
+                  </Col>
+                </Row>
+              )
+            })
+          }
+          {(editStyleConfig.heading_styles as Array<unknown> | undefined)?.length === 0 && (
+            <Text type="secondary">无标题样式配置</Text>
+          )}
+        </Collapse.Panel>
+
+        <Collapse.Panel header="表格样式" key="table">
+          {(() => {
+            const ts = editStyleConfig.table_style as Record<string, unknown> | undefined
+            const hf = ts?.header_font as Record<string, unknown> | undefined
+            if (!ts) return <Text type="secondary">无表格样式配置</Text>
+            return (
+              <>
+                <Row gutter={8}>
+                  <Col span={12}>
+                    <Text type="secondary">边框样式</Text>
+                    <Select
+                      size="small"
+                      style={{ width: '100%' }}
+                      value={String(ts.border_style || 'single')}
+                      onChange={v => updateField('table_style', 'border_style', v)}
+                      options={[
+                        { value: 'single', label: '单线' },
+                        { value: 'double', label: '双线' },
+                        { value: 'three-line', label: '三线表' },
+                        { value: 'none', label: '无边框' },
+                      ]}
+                    />
+                  </Col>
+                  <Col span={12}>
+                    <Text type="secondary">表头加粗</Text>
+                    <Select
+                      size="small"
+                      style={{ width: '100%' }}
+                      value={ts.header_bold ? 'yes' : 'no'}
+                      onChange={v => updateField('table_style', 'header_bold', v === 'yes')}
+                      options={[{ value: 'no', label: '否' }, { value: 'yes', label: '是' }]}
+                    />
+                  </Col>
+                </Row>
+                <Row gutter={8} style={{ marginTop: 8 }}>
+                  <Col span={12}>
+                    <Text type="secondary">表头字体</Text>
+                    <Input
+                      size="small"
+                      value={String(hf?.east_asia_family || hf?.family || '')}
+                      onChange={e => {
+                        const newConfig = {
+                          ...editStyleConfig,
+                          table_style: { ...ts, header_font: { ...(hf || {}), east_asia_family: e.target.value } },
+                        }
+                        setEditStyleConfig(newConfig)
+                        setEditJsonText(JSON.stringify(newConfig, null, 2))
+                      }}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Text type="secondary">字号</Text>
+                    <InputNumber
+                      size="small"
+                      style={{ width: '100%' }}
+                      value={hf?.size_pt as number}
+                      step={0.5}
+                      onChange={v => {
+                        const newConfig = {
+                          ...editStyleConfig,
+                          table_style: { ...ts, header_font: { ...(hf || {}), size_pt: v } },
+                        }
+                        setEditStyleConfig(newConfig)
+                        setEditJsonText(JSON.stringify(newConfig, null, 2))
+                      }}
+                    />
+                  </Col>
+                </Row>
+              </>
+            )
+          })()}
+        </Collapse.Panel>
+
+        <Collapse.Panel header="封面 / 前言 / 附录" key="special">
+          {renderParagraphSectionEditor('cover_style', '封面', 'orange')}
+          {renderParagraphSectionEditor('preface_style', '前言', 'green')}
+          {renderParagraphSectionEditor('appendix_title_style', '附录', 'purple')}
+        </Collapse.Panel>
+
         <Collapse.Panel header="原始 JSON 编辑" key="json">
           <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
             直接编辑 JSON，修改后自动同步到上方表单
@@ -580,6 +967,9 @@ const TemplatesPage: React.FC = () => {
               >
                 <Input placeholder="如：GB/T 14454 国标模板" />
               </Form.Item>
+              <Form.Item name="standard" label="关联标准号">
+                <Input placeholder="如：GB/T 14454.13（可选，用于自动匹配）" />
+              </Form.Item>
               <Form.Item name="description" label="描述">
                 <TextArea rows={2} placeholder="可选" />
               </Form.Item>
@@ -597,6 +987,9 @@ const TemplatesPage: React.FC = () => {
               rules={[{ required: true, message: '请输入模板名称' }]}
             >
               <Input placeholder="如：国标公文模板" />
+            </Form.Item>
+            <Form.Item name="standard" label="关联标准号">
+              <Input placeholder="如：GB/T 9704（可选，用于自动匹配）" />
             </Form.Item>
             <Form.Item name="description" label="描述">
               <TextArea rows={2} placeholder="可选" />
@@ -646,6 +1039,9 @@ const TemplatesPage: React.FC = () => {
                 rules={[{ required: true, message: '请输入模板名称' }]}
               >
                 <Input />
+              </Form.Item>
+              <Form.Item name="standard" label="关联标准号">
+                <Input placeholder="如：GB/T 1.1（可选）" />
               </Form.Item>
               <Form.Item name="description" label="描述">
                 <TextArea rows={2} />

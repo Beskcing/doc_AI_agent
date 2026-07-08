@@ -66,6 +66,7 @@ class StyleTemplateModel(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    standard: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     style_config: Mapped[dict] = mapped_column(JSON, nullable=False)
     source_docx_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

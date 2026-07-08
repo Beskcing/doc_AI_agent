@@ -193,7 +193,8 @@ class MarkdownCleaner:
         if total_len > self.LLM_REVIEW_MAX_CHARS:
             logger.info(
                 "文档较长 (%d 字符 > %d)，启用分段 LLM 审查",
-                total_len, self.LLM_REVIEW_MAX_CHARS,
+                total_len,
+                self.LLM_REVIEW_MAX_CHARS,
             )
             return self._llm_review_chunked(markdown, context)
 
@@ -671,7 +672,7 @@ class MarkdownCleaner:
         return f"""你是一个文档内容审查专家。请审查以下 Markdown 文本，识别并修复语义级别的 OCR 错误。
 
 文档类型: {context.document_type}
-适用标准: {context.detected_standard or '未指定'}
+适用标准: {context.detected_standard or "未指定"}
 
 审查要求:
 1. 识别专业术语的 OCR 识别错误
@@ -698,9 +699,9 @@ class MarkdownCleaner:
         # 移除可能的代码块包裹
         response = llm_response.strip()
         if response.startswith("```markdown"):
-            response = response[len("```markdown"):].strip()
+            response = response[len("```markdown") :].strip()
         if response.startswith("```md"):
-            response = response[len("```md"):].strip()
+            response = response[len("```md") :].strip()
         if response.startswith("```"):
             response = response[3:].strip()
         if response.endswith("```"):

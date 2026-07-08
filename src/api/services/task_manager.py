@@ -100,8 +100,12 @@ class TaskManager:
     # ──────── 任务 CRUD ────────
 
     def create_task(
-        self, upload_id: str, filename: str, standard: str,
-        use_rag: bool = True, llm_model: str = "qwen-plus",
+        self,
+        upload_id: str,
+        filename: str,
+        standard: str,
+        use_rag: bool = True,
+        llm_model: str = "qwen-plus",
         custom_config: dict | None = None,
     ) -> TaskModel:
         """创建新任务（持久化到数据库）"""
@@ -112,8 +116,13 @@ class TaskManager:
 
         with get_db_session() as db:
             task = TaskCRUD.create(
-                db, upload_id=upload_id, filename=filename, standard=standard,
-                status="pending", progress=0, current_step="pending",
+                db,
+                upload_id=upload_id,
+                filename=filename,
+                standard=standard,
+                status="pending",
+                progress=0,
+                current_step="pending",
                 file_size_mb=file_size_mb,
                 config={"use_rag": use_rag, "llm_model": llm_model, **(custom_config or {})},
             )
@@ -131,8 +140,12 @@ class TaskManager:
             return TaskCRUD.list_tasks(db, page=page, page_size=page_size, status=status)
 
     def update_status(
-        self, task_id: str, status: str, progress: int | None = None,
-        current_step: str | None = None, error_message: str | None = None,
+        self,
+        task_id: str,
+        status: str,
+        progress: int | None = None,
+        current_step: str | None = None,
+        error_message: str | None = None,
     ) -> TaskModel | None:
         """更新任务状态（含竞态保护：cancelled 不被 processing 覆盖）"""
         with get_db_session() as db:
@@ -142,8 +155,12 @@ class TaskManager:
                     logger.info("任务 %s 已被取消，跳过 processing 状态更新", task_id)
                     return existing
             return TaskCRUD.update_status(
-                db, task_id, status=status, progress=progress,
-                current_step=current_step, error_message=error_message,
+                db,
+                task_id,
+                status=status,
+                progress=progress,
+                current_step=current_step,
+                error_message=error_message,
             )
 
     def cancel_task(self, task_id: str) -> bool:
@@ -162,8 +179,12 @@ class TaskManager:
             if not task or task.status not in ("failed", "cancelled"):
                 return None
             TaskCRUD.update_status(
-                db, task_id, status="pending", progress=0,
-                current_step="pending", error_message=None,
+                db,
+                task_id,
+                status="pending",
+                progress=0,
+                current_step="pending",
+                error_message=None,
             )
             return TaskCRUD.get(db, task_id)
 
@@ -179,6 +200,7 @@ class TaskManager:
             output_dir = Path("data/output") / task_id
             if output_dir.exists():
                 import shutil
+
                 shutil.rmtree(output_dir, ignore_errors=True)
                 logger.info("任务 %s: 已清理输出目录 %s", task_id, output_dir)
 
@@ -221,8 +243,10 @@ class TaskManager:
 
         try:
             cleaned_md, styled_path, mineru_docx, style_config = self._pipeline.process_task(
-                task_id=task_id, file_path=file_path,
-                target_standard=target_standard, template_id=template_id,
+                task_id=task_id,
+                file_path=file_path,
+                target_standard=target_standard,
+                template_id=template_id,
                 config=config,
             )
             self.update_status(task_id, "completed", progress=100, current_step="completed")
@@ -236,11 +260,16 @@ class TaskManager:
 
     # ──────── 样式管理（委托 PipelineService） ────────
 
-    def apply_template_to_task(self, task_id: str, style_config: dict,
-                               record_adjustment: bool = True, source: str = "apply_template") -> str:
+    def apply_template_to_task(
+        self, task_id: str, style_config: dict, record_adjustment: bool = True, source: str = "apply_template"
+    ) -> str:
         """对已完成任务重新应用样式模板（委托 PipelineService）"""
         return self._pipeline.apply_template_to_task(
-            task_id, style_config, self.get_task, record_adjustment, source,
+            task_id,
+            style_config,
+            self.get_task,
+            record_adjustment,
+            source,
         )
 
     def upload_corrected_docx(self, task_id: str, corrected_docx_path: str) -> dict:
@@ -269,15 +298,15 @@ class TaskManager:
         """获取原始 PDF 路径（委托 PreviewService）"""
         return self._preview.get_original_pdf_path(task_id)
 
-    def get_pdf_page_images(self, task_id: str, dpi: int = 150,
-                            page: int = 1, page_size: int = 5) -> dict | None:
+    def get_pdf_page_images(self, task_id: str, dpi: int = 150, page: int = 1, page_size: int = 5) -> dict | None:
         """PDF → 页面图片预览（委托 PreviewService）"""
         return self._preview.get_pdf_page_images(task_id, dpi, page, page_size)
 
     # ──────── 内容编辑（委托 ContentEditService） ────────
 
-    def update_content(self, task_id: str, content: str, content_type: str = "markdown",
-                       regenerate_docx: bool = True) -> dict:
+    def update_content(
+        self, task_id: str, content: str, content_type: str = "markdown", regenerate_docx: bool = True
+    ) -> dict:
         """更新文档内容（委托 ContentEditService）"""
         return self._content_edit.update_content(task_id, content, content_type, regenerate_docx)
 
@@ -314,13 +343,15 @@ class TaskManager:
     def to_detail_dict(self, task: TaskModel) -> dict:
         """转换为详情响应字典"""
         info = self.to_info_dict(task)
-        info.update({
-            "cleaned_markdown_preview": task.cleaned_markdown_preview,
-            "style_config_preview": task.style_config_preview,
-            "config": task.config,
-            "result_path": task.result_path,
-            "result_json_path": task.result_json_path,
-        })
+        info.update(
+            {
+                "cleaned_markdown_preview": task.cleaned_markdown_preview,
+                "style_config_preview": task.style_config_preview,
+                "config": task.config,
+                "result_path": task.result_path,
+                "result_json_path": task.result_json_path,
+            }
+        )
         return info
 
 

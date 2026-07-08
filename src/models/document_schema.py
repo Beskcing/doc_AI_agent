@@ -43,15 +43,9 @@ class CleaningResult(BaseModel):
 class IntentAnalysis(BaseModel):
     """文档意图分析结果"""
 
-    document_type: str = Field(
-        default="general", description="文档类型，如 '技术报告'、'公文'、'论文'、'标准文件'"
-    )
-    detected_standard: str | None = Field(
-        default=None, description="检测到的适用标准，如 'GB/T 9704'、'GB/T 7713'"
-    )
-    formatting_requirements: list[str] = Field(
-        default_factory=list, description="从文档内容推断的排版需求列表"
-    )
+    document_type: str = Field(default="general", description="文档类型，如 '技术报告'、'公文'、'论文'、'标准文件'")
+    detected_standard: str | None = Field(default=None, description="检测到的适用标准，如 'GB/T 9704'、'GB/T 7713'")
+    formatting_requirements: list[str] = Field(default_factory=list, description="从文档内容推断的排版需求列表")
     has_complex_tables: bool = Field(default=False, description="是否包含复杂表格")
     has_formulas: bool = Field(default=False, description="是否包含数学公式")
     has_chemical_structures: bool = Field(default=False, description="是否包含化学结构式")
@@ -87,6 +81,4 @@ class RetrievalResult(BaseModel):
     source: str = Field(description="来源文档名称")
     section: str = Field(default="", description="来源章节")
     score: float = Field(description="相关性得分")
-    retrieval_method: str = Field(
-        default="hybrid", description="检索方式: bm25 / vector / hybrid"
-    )
+    retrieval_method: str = Field(default="hybrid", description="检索方式: bm25 / vector / hybrid")

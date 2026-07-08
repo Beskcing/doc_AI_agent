@@ -15,7 +15,9 @@ class FontConfig(BaseModel):
     """字体配置"""
 
     family: str = Field(description="字体名称（西文/ASCII），如 'Times New Roman'、'Arial'")
-    east_asia_family: str | None = Field(default=None, description="东亚字体名称，如 '仿宋_GB2312'、'黑体'、'楷体'，None 时与 family 相同")
+    east_asia_family: str | None = Field(
+        default=None, description="东亚字体名称，如 '仿宋_GB2312'、'黑体'、'楷体'，None 时与 family 相同"
+    )
     size_pt: float = Field(description="字号（磅），如 12、16、22")
     bold: bool = Field(default=False, description="是否加粗")
     italic: bool = Field(default=False, description="是否斜体")
@@ -35,12 +37,8 @@ class ParagraphStyleConfig(BaseModel):
     )
     space_before_pt: float = Field(default=0, description="段前间距（磅）")
     space_after_pt: float = Field(default=0, description="段后间距（磅）")
-    alignment: Literal["left", "center", "right", "justify"] = Field(
-        default="left", description="对齐方式"
-    )
-    first_line_indent_chars: float = Field(
-        default=0, description="首行缩进（字符数），如 2 表示缩进两个字符"
-    )
+    alignment: Literal["left", "center", "right", "justify"] = Field(default="left", description="对齐方式")
+    first_line_indent_chars: float = Field(default=0, description="首行缩进（字符数），如 2 表示缩进两个字符")
     left_indent_cm: float = Field(default=0, description="左缩进（厘米）")
     right_indent_cm: float = Field(default=0, description="右缩进（厘米）")
     keep_together: bool = Field(default=False, description="段中不分页")
@@ -52,18 +50,14 @@ class HeadingStyleConfig(ParagraphStyleConfig):
     """标题样式配置（继承段落样式）"""
 
     level: int = Field(ge=1, le=6, description="标题层级 1-6")
-    numbering_format: str | None = Field(
-        default=None, description="编号格式，如 '1.1.1'、'一、'、'(一)'"
-    )
+    numbering_format: str | None = Field(default=None, description="编号格式，如 '1.1.1'、'一、'、'(一)'")
     outline_level: int | None = Field(default=None, description="大纲级别（与 level 可能不同）")
 
 
 class TableStyleConfig(BaseModel):
     """表格样式配置"""
 
-    border_style: Literal["single", "double", "none", "three-line"] = Field(
-        default="single", description="边框样式"
-    )
+    border_style: Literal["single", "double", "none", "three-line"] = Field(default="single", description="边框样式")
     border_width_pt: float = Field(default=0.5, description="边框线宽（磅）")
     border_width_top_pt: float | None = Field(default=None, description="上边框线宽（磅），None 时使用 border_width_pt")
     border_width_bottom_pt: float | None = Field(default=None, description="下边框线宽（磅）")
@@ -81,7 +75,9 @@ class TableStyleConfig(BaseModel):
     cell_padding_left_pt: float = Field(default=2.0, description="单元格左内边距（磅）")
     cell_padding_right_pt: float = Field(default=2.0, description="单元格右内边距（磅）")
     table_alignment: Literal["left", "center", "right"] = Field(default="left", description="表格对齐方式")
-    cell_vertical_alignment: Literal["top", "center", "bottom"] = Field(default="center", description="单元格垂直对齐方式")
+    cell_vertical_alignment: Literal["top", "center", "bottom"] = Field(
+        default="center", description="单元格垂直对齐方式"
+    )
     rag_note: str | None = Field(default=None, description="RAG 规范来源备注")
 
 
@@ -107,9 +103,7 @@ class StyleConfig(BaseModel):
     """
 
     page_layout: PageLayoutConfig = Field(default_factory=PageLayoutConfig, description="页面布局")
-    heading_styles: list[HeadingStyleConfig] = Field(
-        default_factory=list, description="各级标题样式列表"
-    )
+    heading_styles: list[HeadingStyleConfig] = Field(default_factory=list, description="各级标题样式列表")
     body_style: ParagraphStyleConfig = Field(description="正文样式")
     table_style: TableStyleConfig | None = Field(default=None, description="表格样式")
     list_style: ParagraphStyleConfig | None = Field(default=None, description="列表样式")
@@ -117,21 +111,13 @@ class StyleConfig(BaseModel):
     caption_style: ParagraphStyleConfig | None = Field(default=None, description="图表标题样式")
     header_footer_style: ParagraphStyleConfig | None = Field(default=None, description="页眉页脚样式")
     # 封面/前言/附录等特殊区域样式（由 docx_style_extractor 提取，docx_styler 应用）
-    cover_style: ParagraphStyleConfig | None = Field(
-        default=None, description="封面区域样式（大字号居中段落）"
-    )
-    preface_style: ParagraphStyleConfig | None = Field(
-        default=None, description="前言/引言标题样式"
-    )
+    cover_style: ParagraphStyleConfig | None = Field(default=None, description="封面区域样式（大字号居中段落）")
+    preface_style: ParagraphStyleConfig | None = Field(default=None, description="前言/引言标题样式")
     appendix_title_style: ParagraphStyleConfig | None = Field(
         default=None, description="附录标题样式（附录A/附录B等，通常加粗区别于普通一级标题）"
     )
-    appendix_clause_style: ParagraphStyleConfig | None = Field(
-        default=None, description="附录内条款样式（A.1/B.1等）"
-    )
-    table_caption_style: ParagraphStyleConfig | None = Field(
-        default=None, description="表格标题样式（表B.1/表1等）"
-    )
+    appendix_clause_style: ParagraphStyleConfig | None = Field(default=None, description="附录内条款样式（A.1/B.1等）")
+    table_caption_style: ParagraphStyleConfig | None = Field(default=None, description="表格标题样式（表B.1/表1等）")
     rag_sources: list[str] = Field(
         default_factory=list,
         description="RAG 检索到的规范文档来源列表，如 ['国标排版规范_v2.0_第3章']",

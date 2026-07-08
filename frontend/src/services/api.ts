@@ -132,6 +132,7 @@ export const uploadTemplate = (file: File) => {
 export const saveTemplate = (data: {
   name: string
   style_config: Record<string, unknown>
+  standard?: string
   description?: string
   source_docx_path?: string
 }) => api.post('/api/templates', data)
@@ -144,10 +145,14 @@ export const getTemplate = (id: string) => api.get(`/api/templates/${id}`)
 export const updateTemplate = (id: string, data: {
   name?: string
   style_config?: Record<string, unknown>
+  standard?: string
   description?: string
 }) => api.put(`/api/templates/${id}`, data)
 
 export const deleteTemplate = (id: string) => api.delete(`/api/templates/${id}`)
+
+// ────────── Formatter 注册表 ──────────
+export const listFormatters = () => api.get('/api/formatters')
 
 // ────────── 对话排版 ──────────
 export const chatStyle = (data: {

@@ -101,9 +101,7 @@ def safe_parse_llm_json(llm_output: str) -> dict:
         except (json.JSONDecodeError, ValueError):
             pass
 
-    raise ValueError(
-        f"无法从 LLM 输出中提取有效 JSON。输出前 200 字符: {llm_output[:200]}"
-    )
+    raise ValueError(f"无法从 LLM 输出中提取有效 JSON。输出前 200 字符: {llm_output[:200]}")
 
 
 def _extract_json_object(text: str) -> str | None:

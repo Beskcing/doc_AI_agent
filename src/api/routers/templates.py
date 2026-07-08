@@ -35,11 +35,35 @@ def _template_to_info(template) -> StyleTemplateInfo:
         id=template.id,
         name=template.name,
         description=template.description,
+        standard=template.standard,
         style_config=template.style_config,
         source_docx_path=template.source_docx_path,
         created_at=template.created_at,
         updated_at=template.updated_at,
     )
+
+
+def _infer_standard_from_filename(filename: str) -> str | None:
+    """从文件名智能推断标准号
+
+    Examples:
+        "GB_T_14454_13_2008.docx" → "GB/T 14454.13-2008"
+        "GB 5009.225-2016CN.pdf" → "GB 5009.225-2016"
+    """
+    import re
+
+    name = Path(filename).stem
+    # 替换下划线为对应的分隔符
+    name = re.sub(r"_T_", "/T ", name)
+    name = re.sub(r"_Z_", "/Z ", name)
+    name = name.replace("_", ".")
+    # 匹配国标号模式
+    m = re.match(r"(GB[/\s]*[TZ]?\s*[\d.]+(?:-\d+)?)", name, re.IGNORECASE)
+    if m:
+        std = m.group(1).strip()
+        std = std.replace("/ ", "/")
+        return std
+    return None
 
 
 @router.post("/upload", response_model=ResponseModel)
@@ -71,12 +95,17 @@ async def upload_template(file: UploadFile = File(...)) -> ResponseModel:
 
         logger.info("模板样式提取成功: %s (%.2f KB)", file.filename, file_size / 1024)
 
-        return ResponseModel(data={
-            "style_config": style_config,
-            "source_docx_path": str(file_path),
-            "filename": file.filename,
-            "file_size": file_size,
-        })
+        inferred_standard = _infer_standard_from_filename(file.filename or "")
+
+        return ResponseModel(
+            data={
+                "style_config": style_config,
+                "source_docx_path": str(file_path),
+                "filename": file.filename,
+                "file_size": file_size,
+                "inferred_standard": inferred_standard,
+            }
+        )
     except Exception as e:
         logger.exception("模板上传/提取失败: %s", file.filename)
         return ResponseModel(code=500, message=f"模板提取失败: {e}")
@@ -92,6 +121,7 @@ async def save_template(request: SaveTemplateRequest) -> ResponseModel:
                 name=request.name,
                 style_config=request.style_config,
                 description=request.description,
+                standard=request.standard,
                 source_docx_path=request.source_docx_path,
             )
             logger.info("样式模板已保存: %s (%s)", template.name, template.id)
@@ -109,12 +139,14 @@ async def list_templates(
     """获取样式模板列表"""
     with get_db_session() as db:
         templates, total = StyleTemplateCRUD.list_templates(db, page=page, page_size=page_size)
-        return ResponseModel(data=StyleTemplateListResponse(
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_template_to_info(t) for t in templates],
-        ))
+        return ResponseModel(
+            data=StyleTemplateListResponse(
+                total=total,
+                page=page,
+                page_size=page_size,
+                items=[_template_to_info(t) for t in templates],
+            )
+        )
 
 
 @router.get("/{template_id}", response_model=ResponseModel)
@@ -133,9 +165,11 @@ async def update_template(template_id: str, request: UpdateTemplateRequest) -> R
     with get_db_session() as db:
         try:
             template = StyleTemplateCRUD.update(
-                db, template_id,
+                db,
+                template_id,
                 name=request.name,
                 style_config=request.style_config,
+                standard=request.standard,
                 description=request.description,
             )
             if not template:

@@ -158,6 +158,7 @@ class StandardsDocumentLoader:
         # 尝试使用 MinerU
         try:
             from src.tools.mineru_parser import MinerUParser
+
             parser = MinerUParser()
             if parser.check_installation():
                 result = parser.parse_pdf(file_path)

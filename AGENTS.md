@@ -16,6 +16,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 ## 关键路径
 - 工作流：`src/workflows/doc_formatting_graph.py` | LLM 封装：`src/llm_client.py`
 - 工具链：`src/tools/` (mineru_parser, pandoc_converter, docx_styler, gbt_docx_formatter, markdown_cleaner, html_table_preserver, content_normalizer, content_pattern_matcher, docx_normalizer)
+- Formatter 注册系统：`src/tools/formatters/` (base/registry/gbt_1_1, 支持用户通过 Python 脚本注册自定义格式规范)
 - RAG：`src/rag/` | API：`src/api/` | DB：`src/db/` | 前端：`frontend/`
 - 提示词：`prompts/` | 配置：`configs/settings.yaml` | 架构文档：`docs/ARCHITECTURE.md`
 
@@ -56,8 +57,12 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-07 | feat | Docker多阶段构建+前端编译+python:3.12-slim+pandoc+docker-compose一键启动+后端SPA静态文件挂载 |
 | 2026-07-08 | feat | DocxNormalizer: DOCX层内容规整(日期合并/拆分标题合并/TOC删除/双空格修正), MinerU DOCX优先+Pandoc降级 |
 | 2026-07-08 | feat | gbt技能内联：新增content_normalizer(日期合并/标题合并/TOC删除/双空格)+DocxStyler增强(图片居中/docDefaults/新角色) |
-| 2026-07-08 | feat | GbtDocxFormatter: MinerU DOCX路径新增GB/T 1.1硬编码格式修正器，替代LLM+RAG style_config；默认样式修正为宋体10.5pt/25mm边距；prompt示例更新为GB/T 1.1规范 |
+| 2026-07-08 | feat | Formatter注册系统: BaseDocxFormatter基类+Registry自动发现+标准号映射, 用户添加Python脚本即可注册新格式规范 |
+| 2026-07-08 | fix | Pipeline自动匹配模板Bug修复: 注册Formatter标准跳过模板匹配, 避免绕过GbtDocxFormatter路径 |
 | 2026-07-07 | config | LLM Provider从Qwen切换为智谱AI(GLM-4)，默认模型glm-4 |
+| 2026-07-08 | feat | 格式规范分类重构: StyleTemplateModel添加standard字段+Alembic迁移+三级匹配策略(精确→模糊→名称)+模板CRUD支持标准号+文件名智能推断 |
+| 2026-07-08 | feat | Pipeline路由优先级显式化: 手动选择>Formatter>自动匹配模板, applied_format来源追溯记录(formatter/template/llm) |
+| 2026-07-08 | feat | 前端TemplatesPage样式编辑器增强: 新增段落格式面板(行距类型/段间距/缩进/分页控制)+封面/前言/附录面板可编辑(字体/字号/加粗/对齐) |
 | 2026-07-07 | fix | 对话LLM失败时自动回滚孤立用户消息，ChatMessageCRUD新增delete方法 |
 | 2026-07-07 | feat | html_to_pipe支持colspan/rowspan合并单元格 |
 | 2026-07-07 | perf | hybrid_retriever _find_doc_index O(n)→O(1)哈希索引 |

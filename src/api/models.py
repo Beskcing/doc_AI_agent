@@ -173,6 +173,7 @@ class SaveTemplateRequest(BaseModel):
 
     name: str = Field(description="模板名称")
     style_config: dict[str, Any] = Field(description="样式配置 JSON")
+    standard: str | None = Field(default=None, description="关联标准号，如 GB/T 1.1")
     description: str | None = Field(default=None, description="模板描述")
     source_docx_path: str | None = Field(default=None, description="来源 DOCX 路径")
 
@@ -182,6 +183,7 @@ class UpdateTemplateRequest(BaseModel):
 
     name: str | None = Field(default=None, description="模板名称")
     style_config: dict[str, Any] | None = Field(default=None, description="样式配置 JSON")
+    standard: str | None = Field(default=None, description="关联标准号")
     description: str | None = Field(default=None, description="模板描述")
 
 
@@ -191,6 +193,7 @@ class StyleTemplateInfo(BaseModel):
     id: str = Field(description="模板 ID")
     name: str = Field(description="模板名称")
     description: str | None = Field(default=None, description="模板描述")
+    standard: str | None = Field(default=None, description="关联标准号")
     style_config: dict[str, Any] = Field(description="样式配置")
     source_docx_path: str | None = Field(default=None, description="来源 DOCX 路径")
     created_at: datetime = Field(description="创建时间")
