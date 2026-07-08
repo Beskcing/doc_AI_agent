@@ -30,7 +30,7 @@
 - 标题编号格式
 
 ### 3. 正文样式 (body_style)
-- 字体（如仿宋_GB2312）、字号（如三号/16pt）
+- 字体（如宋体）、字号（如五号/10.5pt）
 - 行距、首行缩进
 
 ### 4. 表格样式 (table_style)
@@ -45,37 +45,43 @@
 
 请输出严格的 JSON 格式，不要添加任何解释性文字或代码块标记。所有尺寸单位使用磅（pt），页边距使用厘米（cm）。
 
-示例结构：
+示例结构（GB/T 1.1 国标编写规则）：
 ```json
 {
   "page_layout": {
     "paper_size": "A4",
-    "margin_top_cm": 3.7,
-    "margin_bottom_cm": 3.5,
-    "margin_left_cm": 2.8,
-    "margin_right_cm": 2.6
+    "margin_top_cm": 2.5,
+    "margin_bottom_cm": 2.5,
+    "margin_left_cm": 2.5,
+    "margin_right_cm": 2.1
   },
   "heading_styles": [
     {
       "level": 1,
-      "font": {"family": "黑体", "size_pt": 22, "bold": true},
+      "font": {"family": "Times New Roman", "east_asia_family": "黑体", "size_pt": 16, "bold": true},
       "alignment": "center",
-      "line_spacing": 2.0
+      "line_spacing": 1.0
+    },
+    {
+      "level": 2,
+      "font": {"family": "Times New Roman", "east_asia_family": "宋体", "size_pt": 10.5, "bold": false},
+      "alignment": "justify",
+      "line_spacing": 1.0
     }
   ],
   "body_style": {
-    "font": {"family": "仿宋_GB2312", "size_pt": 16},
-    "line_spacing": 1.5,
+    "font": {"family": "Times New Roman", "east_asia_family": "宋体", "size_pt": 10.5},
+    "line_spacing": 1.0,
     "first_line_indent_chars": 2,
     "alignment": "justify"
   },
   "table_style": {
     "border_style": "single",
     "border_width_pt": 0.5,
-    "header_font": {"family": "黑体", "size_pt": 12, "bold": true},
-    "body_font": {"family": "仿宋_GB2312", "size_pt": 10.5},
-    "header_bold": true
+    "header_font": {"family": "Times New Roman", "east_asia_family": "宋体", "size_pt": 10.5, "bold": false},
+    "body_font": {"family": "Times New Roman", "east_asia_family": "宋体", "size_pt": 10.5},
+    "header_bold": false
   },
-  "rag_sources": ["国标排版规范_v2.0"]
+  "rag_sources": ["GB/T 1.1 标准化工作导则"]
 }
 ```

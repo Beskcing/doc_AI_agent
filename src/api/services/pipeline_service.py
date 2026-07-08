@@ -126,28 +126,41 @@ class PipelineService:
             style_config = self._get_template_style(template_id)
             logger.info("任务 %s: 使用模板 %s 的样式配置", task_id, template_id)
         else:
+            # 无模板时：MinerU DOCX 路径由 GbtDocxFormatter 硬编码处理（不依赖 LLM）
+            # 仅 Pandoc 降级路径需要 LLM 生成 style_config
             style_config = self._generate_style_config(task_id, cleaned_markdown, intent)
 
         # ── 阶段 3: 确定基础 DOCX ──
         self._update_status(task_id, "processing", progress=40, current_step="prepare_docx")
         if mineru_docx_path and Path(mineru_docx_path).exists():
             docx_path = mineru_docx_path
-            logger.info("任务 %s: 使用 MinerU 原始 DOCX 作为样式基础: %s", task_id, docx_path)
 
-            # 阶段 3.5: DOCX 内容规整（仅 MinerU DOCX 路径）
-            from src.tools.docx_normalizer import DocxNormalizer
+            if not template_id:
+                # 无模板 + MinerU DOCX → GbtDocxFormatter 硬编码 GB/T 1.1 规范
+                # 跳过 LLM style_config，直接使用正确的国标格式
+                logger.info("任务 %s: 使用 GbtDocxFormatter (GB/T 1.1 硬编码规范)", task_id)
+                style_config = self._default_style_config()
+                styled_path = self._apply_gbt_format(task_id, docx_path)
+            else:
+                # 有模板 → DocxNormalizer + DocxStyler
+                logger.info("任务 %s: 使用 MinerU 原始 DOCX + 模板样式", task_id)
+                from src.tools.docx_normalizer import DocxNormalizer
 
-            normalizer = DocxNormalizer()
-            normalized_path = str(result_dir / "normalized.docx")
-            docx_path = normalizer.normalize(docx_path, normalized_path)
-            logger.info("任务 %s: DOCX 内容规整完成, %d 处更改", task_id, len(normalizer.changes))
+                normalizer = DocxNormalizer()
+                normalized_path = str(result_dir / "normalized.docx")
+                docx_path = normalizer.normalize(docx_path, normalized_path)
+                logger.info("任务 %s: DOCX 内容规整完成, %d 处更改", task_id, len(normalizer.changes))
+
+                # ── 阶段 4: 模板样式渲染 ──
+                self._update_status(task_id, "processing", progress=70, current_step="apply_style")
+                styled_path = self._apply_style(task_id, docx_path, style_config)
         else:
             logger.warning("任务 %s: MinerU 未输出 DOCX，降级使用 Pandoc 转换", task_id)
             docx_path = self._convert_to_docx(task_id, cleaned_markdown, extract_dir)
 
-        # ── 阶段 4: 国标样式渲染 ──
-        self._update_status(task_id, "processing", progress=70, current_step="apply_style")
-        styled_path = self._apply_style(task_id, docx_path, style_config)
+            # ── 阶段 4: 国标样式渲染 ──
+            self._update_status(task_id, "processing", progress=70, current_step="apply_style")
+            styled_path = self._apply_style(task_id, docx_path, style_config)
 
         # ── 阶段 5: 最终化 ──
         self._update_status(task_id, "processing", progress=90, current_step="finalize")
@@ -456,16 +469,16 @@ class PipelineService:
             style = StyleConfig(
                 page_layout={
                     "paper_size": "A4",
-                    "margin_top_cm": 3.7,
-                    "margin_bottom_cm": 3.5,
-                    "margin_left_cm": 2.8,
-                    "margin_right_cm": 2.6,
+                    "margin_top_cm": 2.5,
+                    "margin_bottom_cm": 2.5,
+                    "margin_left_cm": 2.5,
+                    "margin_right_cm": 2.1,
                     "header_distance_cm": 1.5,
                     "footer_distance_cm": 1.75,
                 },
                 body_style={
-                    "font": {"family": "仿宋_GB2312", "size_pt": 16},
-                    "line_spacing": 1.5,
+                    "font": {"family": "Times New Roman", "east_asia_family": "宋体", "size_pt": 10.5},
+                    "line_spacing": 1.0,
                     "first_line_indent_chars": 2,
                     "alignment": "justify",
                 },
@@ -482,6 +495,45 @@ class PipelineService:
             logger.info("任务 %s: 回退到原始输出", task_id)
 
         logger.info("任务 %s: 样式应用完成 → %s", task_id, styled_path)
+        return str(styled_path)
+
+    def _apply_gbt_format(self, task_id: str, docx_path: str) -> str:
+        """使用 GbtDocxFormatter 硬编码 GB/T 1.1 规范格式化 DOCX
+
+        替代 LLM+RAG 生成的 style_config 路径，直接使用正确的国标格式值。
+        内部完成：页面设置 → 内容规整 → 段落分类 → 格式应用 → 表格/图片处理。
+
+        Args:
+            task_id: 任务 ID
+            docx_path: 输入 DOCX 路径（MinerU 原始 DOCX）
+
+        Returns:
+            输出 DOCX 路径
+        """
+        from src.tools.gbt_docx_formatter import GbtDocxFormatter
+
+        result_dir = Path("data/output") / task_id
+        styled_path = result_dir / "formatted_styled.docx"
+
+        self._update_status(task_id, "processing", progress=50, current_step="gbt_format")
+        formatter = GbtDocxFormatter()
+        report = formatter.process(docx_path, str(styled_path))
+
+        if not report.success:
+            logger.warning("任务 %s: GBT 格式应用部分失败: %s", task_id, report.warnings)
+            import shutil
+
+            shutil.copy(docx_path, styled_path)
+            logger.info("任务 %s: 回退到原始输出", task_id)
+
+        logger.info(
+            "任务 %s: GBT 格式化完成 → %s (段落=%d, 标题=%d, 表格=%d)",
+            task_id,
+            styled_path,
+            report.paragraphs_styled,
+            report.headings_styled,
+            report.tables_styled,
+        )
         return str(styled_path)
 
     def apply_template_to_task(
@@ -665,43 +717,70 @@ class PipelineService:
                 return "暂无历史调整记录。"
 
     def _default_style_config(self) -> dict:
-        """默认样式配置（LLM 降级用）"""
+        """默认样式配置（GB/T 1.1 国标编写规则）
+
+        用于 LLM 降级和 Pandoc 转换路径。
+        MinerU DOCX 路径由 GbtDocxFormatter 硬编码处理，不使用此配置。
+        """
         return {
             "page_layout": {
                 "paper_size": "A4",
-                "margin_top_cm": 3.7,
-                "margin_bottom_cm": 3.5,
-                "margin_left_cm": 2.8,
-                "margin_right_cm": 2.6,
+                "margin_top_cm": 2.5,
+                "margin_bottom_cm": 2.5,
+                "margin_left_cm": 2.5,
+                "margin_right_cm": 2.1,
                 "header_distance_cm": 1.5,
                 "footer_distance_cm": 1.75,
             },
             "heading_styles": [
                 {
                     "level": 1,
-                    "font": {"family": "黑体", "size_pt": 22, "bold": True},
+                    "font": {"family": "宋体", "east_asia_family": "黑体", "size_pt": 16, "bold": True},
                     "alignment": "center",
-                    "line_spacing": 2.0,
+                    "line_spacing": 1.0,
                 },
                 {
                     "level": 2,
-                    "font": {"family": "黑体", "size_pt": 16, "bold": True},
-                    "alignment": "left",
-                    "line_spacing": 1.5,
+                    "font": {"family": "宋体", "east_asia_family": "宋体", "size_pt": 10.5, "bold": False},
+                    "alignment": "justify",
+                    "line_spacing": 1.0,
+                },
+                {
+                    "level": 3,
+                    "font": {"family": "宋体", "east_asia_family": "宋体", "size_pt": 10.5, "bold": False},
+                    "alignment": "justify",
+                    "line_spacing": 1.0,
+                },
+                {
+                    "level": 4,
+                    "font": {"family": "宋体", "east_asia_family": "宋体", "size_pt": 10.5, "bold": False},
+                    "alignment": "justify",
+                    "line_spacing": 1.0,
+                },
+                {
+                    "level": 5,
+                    "font": {"family": "宋体", "east_asia_family": "宋体", "size_pt": 10.5, "bold": False},
+                    "alignment": "justify",
+                    "line_spacing": 1.0,
                 },
             ],
             "body_style": {
-                "font": {"family": "仿宋_GB2312", "size_pt": 16},
-                "line_spacing": 1.5,
+                "font": {"family": "Times New Roman", "east_asia_family": "宋体", "size_pt": 10.5},
+                "line_spacing": 1.0,
                 "first_line_indent_chars": 2,
                 "alignment": "justify",
             },
             "table_style": {
                 "border_style": "single",
                 "border_width_pt": 0.5,
-                "header_font": {"family": "黑体", "size_pt": 12, "bold": True},
-                "body_font": {"family": "仿宋_GB2312", "size_pt": 10.5},
-                "header_bold": True,
+                "header_font": {
+                    "family": "Times New Roman",
+                    "east_asia_family": "宋体",
+                    "size_pt": 10.5,
+                    "bold": False,
+                },
+                "body_font": {"family": "Times New Roman", "east_asia_family": "宋体", "size_pt": 10.5},
+                "header_bold": False,
             },
-            "rag_sources": [],
+            "rag_sources": ["GB/T 1.1 标准化工作导则"],
         }
