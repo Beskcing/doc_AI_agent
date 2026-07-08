@@ -17,7 +17,8 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 - 工作流：`src/workflows/doc_formatting_graph.py` | LLM 封装：`src/llm_client.py`
 - 工具链：`src/tools/` (mineru_parser, pandoc_converter, docx_styler, gbt_docx_formatter, markdown_cleaner, html_table_preserver, content_normalizer, content_pattern_matcher, docx_normalizer)
 - Formatter 注册系统：`src/tools/formatters/` (base/registry/gbt_1_1, 支持用户通过 Python 脚本注册自定义格式规范)
-- RAG：`src/rag/` | API：`src/api/` | DB：`src/db/` | 前端：`frontend/`
+- 格式规范分类匹配：`src/db/crud.py` StyleTemplateCRUD.match_by_standard() 三级策略(精确→模糊→名称), 模板 standard 字段显式绑定标准号
+- RAG：`src/rag/` | API：`src/api/` (含 formatters 路由查询注册表) | DB：`src/db/` | 前端：`frontend/`
 - 提示词：`prompts/` | 配置：`configs/settings.yaml` | 架构文档：`docs/ARCHITECTURE.md`
 
 ## 工程规范
