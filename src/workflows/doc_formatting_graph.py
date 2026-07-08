@@ -352,6 +352,14 @@ def _render_docx(
     if mineru_docx_path and Path(mineru_docx_path).exists():
         docx_base_path = mineru_docx_path
         logger.info("[render_docx] 使用 MinerU 原始 DOCX 作为样式基础: %s", docx_base_path)
+
+        # DOCX 内容规整（日期合并/拆分标题合并/TOC删除/双空格修正）
+        from src.tools.docx_normalizer import DocxNormalizer
+
+        normalizer = DocxNormalizer()
+        normalized_path = str(output_dir / "normalized.docx")
+        docx_base_path = normalizer.normalize(docx_base_path, normalized_path)
+        logger.info("[render_docx] DOCX 内容规整完成, %d 处更改", len(normalizer.changes))
     else:
         # 回退：Pandoc MD → DOCX
         intermediate_path = output_dir / "intermediate.docx"

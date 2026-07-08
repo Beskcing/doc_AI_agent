@@ -133,7 +133,16 @@ class PipelineService:
         if mineru_docx_path and Path(mineru_docx_path).exists():
             docx_path = mineru_docx_path
             logger.info("任务 %s: 使用 MinerU 原始 DOCX 作为样式基础: %s", task_id, docx_path)
+
+            # 阶段 3.5: DOCX 内容规整（仅 MinerU DOCX 路径）
+            from src.tools.docx_normalizer import DocxNormalizer
+
+            normalizer = DocxNormalizer()
+            normalized_path = str(result_dir / "normalized.docx")
+            docx_path = normalizer.normalize(docx_path, normalized_path)
+            logger.info("任务 %s: DOCX 内容规整完成, %d 处更改", task_id, len(normalizer.changes))
         else:
+            logger.warning("任务 %s: MinerU 未输出 DOCX，降级使用 Pandoc 转换", task_id)
             docx_path = self._convert_to_docx(task_id, cleaned_markdown, extract_dir)
 
         # ── 阶段 4: 国标样式渲染 ──
