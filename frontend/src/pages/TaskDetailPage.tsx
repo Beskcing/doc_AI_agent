@@ -256,11 +256,20 @@ const TaskDetailPage: React.FC = () => {
   const handleOpenEditStyle = async () => {
     let config = preview?.style_config || task?.style_config_preview
     if (!config) {
-      // 先加载预览获取 style_config
-      if (!preview) {
-        await fetchPreview()
+      // 先加载预览获取 style_config（直接捕获 API 返回值，避免 React state 时序问题）
+      if (!taskId) return
+      setPreviewLoading(true)
+      try {
+        const res = await previewTask(taskId)
+        const data = res.data.data
+        setPreview(data)
+        config = data.style_config
+      } catch (error: any) {
+        message.error(error.message || '获取预览失败')
+        return
+      } finally {
+        setPreviewLoading(false)
       }
-      config = preview?.style_config || task?.style_config_preview
     }
     if (!config) {
       message.warning('无法获取当前样式配置，请先点击「预览结果」加载')

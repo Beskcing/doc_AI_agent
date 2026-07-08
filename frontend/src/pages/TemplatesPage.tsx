@@ -121,9 +121,14 @@ const TemplatesPage: React.FC = () => {
   const handleSaveNewTemplate = async () => {
     try {
       const values = await createForm.validateFields()
+      // 手动创建模式下，校验 style_config_json 是否已解析为有效 JSON
+      if (!extractedConfig) {
+        message.error('请输入有效的样式配置 JSON')
+        return
+      }
       await saveTemplate({
         name: values.name,
-        style_config: extractedConfig!,
+        style_config: extractedConfig,
         description: values.description,
         source_docx_path: extractedDocxPath || undefined,
       })
