@@ -45,6 +45,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-08 | fix | Loop Engineering V7全面测试: 修复Formatters路由SPA fallback拦截+create_task文件校验+TemplatesPage stale state, 新增74项自动化测试 |
 | 2026-07-08 | fix | TaskDetailPage修正样式React State时序Bug修复(inline API调用避免stale closure) |
 | 2026-07-08 | fix | TemplatesPage手动创建extractedConfig空指针崩溃修复(添加null校验+友好提示) |
 | 2026-07-07 | fix | TinyMCE v8配置项名称修正: font_family_formats/font_size_formats/toolbar fontsize按钮(非fontsizeselect) |

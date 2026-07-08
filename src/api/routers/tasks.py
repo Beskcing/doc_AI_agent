@@ -58,6 +58,10 @@ async def create_task(request: CreateTaskRequest) -> ResponseModel:
                 filename = candidate.name
                 break
 
+        # 校验：上传文件必须存在
+        if file_path is None:
+            return ResponseModel(code=400, message=f"上传文件不存在: {upload_id}（请先上传文件再创建任务）")
+
         # Bug#1 修复：恢复原始文件名
         filename = _resolve_original_filename(upload_id, filename)
 
@@ -89,6 +93,7 @@ async def batch_create_tasks(request: BatchCreateTaskRequest) -> ResponseModel:
     """
     try:
         created_tasks = []
+        skipped_count = 0
         for item in request.items:
             # 查找上传的文件
             file_path = None
@@ -99,6 +104,12 @@ async def batch_create_tasks(request: BatchCreateTaskRequest) -> ResponseModel:
                     file_path = str(candidate)
                     filename = candidate.name
                     break
+
+            # 跳过不存在的上传文件
+            if file_path is None:
+                logger.warning("批量创建: 跳过不存在的文件 upload_id=%s", item.upload_id)
+                skipped_count += 1
+                continue
 
             # Bug#1 修复：恢复原始文件名
             filename = _resolve_original_filename(item.upload_id, filename)
@@ -118,7 +129,7 @@ async def batch_create_tasks(request: BatchCreateTaskRequest) -> ResponseModel:
             task_manager.submit_task(task.id)
             created_tasks.append(task_manager.to_info_dict(task))
 
-        return ResponseModel(data={"tasks": created_tasks, "count": len(created_tasks)})
+        return ResponseModel(data={"tasks": created_tasks, "count": len(created_tasks), "skipped": skipped_count})
     except Exception as e:
         logger.exception("批量创建任务失败")
         return ResponseModel(code=500, message=f"批量创建任务失败: {e}")

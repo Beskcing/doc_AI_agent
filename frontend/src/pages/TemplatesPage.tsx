@@ -1007,7 +1007,7 @@ const TemplatesPage: React.FC = () => {
                   try {
                     setExtractedConfig(JSON.parse(e.target.value))
                   } catch {
-                    // 忽略
+                    setExtractedConfig(null)
                   }
                 }}
               />
