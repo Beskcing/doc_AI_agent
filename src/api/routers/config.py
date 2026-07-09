@@ -50,6 +50,7 @@ async def get_supported_standards() -> ResponseModel:
     """获取支持的排版规范列表"""
     return ResponseModel(
         data=[
+            {"value": "GB/T 1.1", "label": "标准化工作导则 (GB/T 1.1)"},
             {"value": "GB/T 9704", "label": "党政机关公文格式"},
             {"value": "GB/T 7713", "label": "科技报告编写格式"},
             {"value": "custom", "label": "自定义规范"},

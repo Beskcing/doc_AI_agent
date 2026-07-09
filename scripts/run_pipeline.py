@@ -2,7 +2,7 @@
 
 用法:
     python -m scripts.run_pipeline --input doc.pdf --output output.docx
-    python -m scripts.run_pipeline --input doc.md --standard "GB/T 9704" --provider glm
+    python -m scripts.run_pipeline --input doc.md --standard "GB/T 1.1" --provider glm
 """
 
 from __future__ import annotations
@@ -34,14 +34,14 @@ def main():
         epilog="""
 示例:
   python -m scripts.run_pipeline --input doc.pdf --output output.docx
-  python -m scripts.run_pipeline --input doc.md --standard "GB/T 9704" --provider glm
+  python -m scripts.run_pipeline --input doc.md --standard "GB/T 1.1" --provider glm
   python -m scripts.run_pipeline --input doc.md --output-json style.json --skip-render
         """,
     )
 
     parser.add_argument("--input", "-i", required=True, help="输入文件路径（PDF 或 Markdown）")
     parser.add_argument("--output", "-o", default="data/output/output.docx", help="输出 Word 文件路径")
-    parser.add_argument("--standard", "-s", default="", help="目标标准编号，如 GB/T 9704")
+    parser.add_argument("--standard", "-s", default="GB/T 1.1", help="目标标准编号，如 GB/T 1.1")
     parser.add_argument("--provider", "-p", default=None, help="LLM Provider (qwen / glm)")
     parser.add_argument("--config", "-c", default=None, help="配置文件路径")
     parser.add_argument("--output-json", default=None, help="额外输出 style_config JSON 文件")
@@ -123,11 +123,17 @@ def main():
         # 更新任务状态为完成
         with get_db_session() as db:
             from src.db.crud import TaskCRUD
+
             TaskCRUD.update_status(
-                db, task_id, status="completed", progress=100,
-                current_step="done", error_message=None,
+                db,
+                task_id,
+                status="completed",
+                progress=100,
+                current_step="done",
+                error_message=None,
             )
             from datetime import datetime as _dt
+
             task_db = TaskCRUD.get(db, task_id)
             if task_db:
                 task_db.completed_at = _dt.now()
@@ -139,8 +145,12 @@ def main():
         logger.error("工作流错误: %s", e)
         with get_db_session() as db:
             from src.db.crud import TaskCRUD
+
             TaskCRUD.update_status(
-                db, task_id, status="failed", error_message=error_msg,
+                db,
+                task_id,
+                status="failed",
+                error_message=error_msg,
             )
 
     # 输出结果
@@ -152,6 +162,7 @@ def main():
         # 复制到用户指定的输出路径
         if args.output and args.output != "data/output/output.docx":
             import shutil
+
             ensure_dir(Path(args.output).parent)
             shutil.copy2(styled_path, args.output)
             logger.info("已复制到: %s", args.output)

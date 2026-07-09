@@ -30,6 +30,7 @@ class DocumentType(str, Enum):
 class StandardOption(str, Enum):
     """排版规范选项"""
 
+    GBT_1_1 = "GB/T 1.1"
     GBT_9704 = "GB/T 9704"
     GBT_7713 = "GB/T 7713"
     CUSTOM = "custom"
