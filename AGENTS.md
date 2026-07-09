@@ -30,6 +30,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 5. **文档同步**：行为/工具链变更时更新 AGENTS.md，新增排版规则更新至 RAG 知识库。
 6. **Git 提交（强制）**：每次变更后 `git add -A` + `git commit`（前缀 `feat:/fix:/refactor:/docs:`）+ 更新 AGENTS.md + `git push origin master`。远程：`https://github.com/Beskcing/doc_AI_agent.git`
 7. **变更前讨论（强制）**：每次想要修改或增加功能时，必须先与用户讨论方案、达成一致后，方可开始编码。严禁未经讨论直接动手改代码。
+8. **测试文件不入库**：`tests/` 目录下的测试文件、fixtures、分析脚本、E2E 用例均不纳入 Git 版本管理。测试文件仅供本地开发调试使用。
 
 ## MinerU 配置
 通过 `configs/settings.yaml` 的 `mineru.mode` 切换：`online`（默认，线上 API，需 `MINERU_API_TOKEN`）或 `local`（magic-pdf SDK）。模型版本默认 `vlm`。客户端：`src/tools/mineru_api_client.py`，统一入口：`src/tools/mineru_parser.py`。

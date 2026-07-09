@@ -53,3 +53,6 @@ data/output/
 
 # pytest
 .pytest_cache/
+
+# 测试文件不入库
+tests/
