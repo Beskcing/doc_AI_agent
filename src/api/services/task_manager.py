@@ -217,7 +217,7 @@ class TaskManager:
         """获取磁盘用量统计
 
         Returns:
-            { output_mb, uploads_mb, total_mb, output_task_count }
+            { output_mb, uploads_mb, total_mb, output_task_count, orphaned_count }
         """
         output_dir = Path("data/output")
         uploads_dir = Path("data/uploads")
@@ -237,27 +237,37 @@ class TaskManager:
         output_mb = round(_dir_size(output_dir), 2)
         uploads_mb = round(_dir_size(uploads_dir), 2)
         task_count = 0
+        orphaned_count = 0
         if output_dir.exists():
-            task_count = sum(1 for d in output_dir.iterdir() if d.is_dir())
+            # 获取所有 DB 中存在的 task_id 集合
+            with get_db_session() as db:
+                db_task_ids = {t[0] for t in db.query(TaskModel.id).all()}
+            for d in output_dir.iterdir():
+                if d.is_dir():
+                    task_count += 1
+                    if d.name not in db_task_ids:
+                        orphaned_count += 1
 
         return {
             "output_mb": output_mb,
             "uploads_mb": uploads_mb,
             "total_mb": round(output_mb + uploads_mb, 2),
             "output_task_count": task_count,
+            "orphaned_count": orphaned_count,
         }
 
     def cleanup_old_tasks(self, older_than_days: int = 30, dry_run: bool = False) -> dict:
-        """清理超过 N 天的已完成/失败/取消任务的输出目录
+        """清理超过 N 天的任务输出目录（文件系统优先扫描，覆盖孤儿目录）
 
-        只删除输出目录，保留数据库记录以便查看历史。
+        扫描策略：直接遍历 data/output/ 目录，而非依赖 DB 查询，
+        确保 DB 记录已被删除的孤儿目录也能被清理。
 
         Args:
-            older_than_days: 清理多少天前的任务
+            older_than_days: 清理多少天前的目录
             dry_run: 仅计算不实际删除
 
         Returns:
-            { deleted_count, freed_mb, scanned_count }
+            { deleted_count, freed_mb, scanned_count, orphaned_count }
         """
         import shutil
         from datetime import datetime, timedelta
@@ -267,49 +277,79 @@ class TaskManager:
         deleted_count = 0
         freed_bytes = 0
         scanned_count = 0
+        orphaned_count = 0
 
+        if not output_dir.exists():
+            return {"deleted_count": 0, "freed_mb": 0.0, "scanned_count": 0, "orphaned_count": 0}
+
+        # 一次性加载 DB 中的任务信息（ID → (status, created_at)）
+        db_tasks: dict[str, tuple[str, datetime]] = {}
         with get_db_session() as db:
-            # 查找超过 N 天且非 processing 状态的任务
-            tasks = (
-                db.query(TaskModel)
-                .filter(
-                    TaskModel.status.in_(["completed", "failed", "cancelled"]),
-                    TaskModel.created_at < cutoff,
+            rows = db.query(TaskModel.id, TaskModel.status, TaskModel.created_at).all()
+            db_tasks = {r[0]: (r[1], r[2]) for r in rows}
+
+        # 遍历文件系统中的所有输出目录
+        for task_dir in output_dir.iterdir():
+            if not task_dir.is_dir():
+                continue
+            task_id = task_dir.name
+            scanned_count += 1
+
+            # 判断是否需要清理
+            should_clean = False
+            is_orphan = task_id not in db_tasks
+
+            if is_orphan:
+                # 孤儿目录：按目录修改时间判断
+                orphaned_count += 1
+                dir_mtime = datetime.fromtimestamp(task_dir.stat().st_mtime)
+                if dir_mtime < cutoff:
+                    should_clean = True
+            else:
+                # 有 DB 记录：按任务状态 + 创建时间判断
+                status, created_at = db_tasks[task_id]
+                if status in ("completed", "failed", "cancelled") and created_at < cutoff:
+                    should_clean = True
+
+            if not should_clean:
+                continue
+
+            # 计算目录大小
+            dir_size = 0
+            for f in task_dir.rglob("*"):
+                if f.is_file():
+                    try:
+                        dir_size += f.stat().st_size
+                    except OSError:
+                        pass
+
+            if not dry_run:
+                shutil.rmtree(task_dir, ignore_errors=True)
+                logger.info(
+                    "清理%s输出: %s (%.2f MB)",
+                    "孤儿" if is_orphan else "旧任务",
+                    task_id,
+                    dir_size / 1024 / 1024,
                 )
-                .all()
-            )
-            scanned_count = len(tasks)
 
-            for task in tasks:
-                task_output = output_dir / task.id
-                if not task_output.exists():
-                    continue
-
-                # 计算目录大小
-                dir_size = 0
-                for f in task_output.rglob("*"):
-                    if f.is_file():
-                        try:
-                            dir_size += f.stat().st_size
-                        except OSError:
-                            pass
-
-                if not dry_run:
-                    shutil.rmtree(task_output, ignore_errors=True)
-                    logger.info("清理旧任务输出: %s (%.2f MB)", task.id, dir_size / 1024 / 1024)
-
-                deleted_count += 1
-                freed_bytes += dir_size
+            deleted_count += 1
+            freed_bytes += dir_size
 
         freed_mb = round(freed_bytes / (1024 * 1024), 2)
         logger.info(
-            "清理完成: 扫描 %d 个任务, 删除 %d 个目录, 释放 %.2f MB%s",
+            "清理完成: 扫描 %d 个目录(含 %d 孤儿), 删除 %d 个, 释放 %.2f MB%s",
             scanned_count,
+            orphaned_count,
             deleted_count,
             freed_mb,
             " (dry_run)" if dry_run else "",
         )
-        return {"deleted_count": deleted_count, "freed_mb": freed_mb, "scanned_count": scanned_count}
+        return {
+            "deleted_count": deleted_count,
+            "freed_mb": freed_mb,
+            "scanned_count": scanned_count,
+            "orphaned_count": orphaned_count,
+        }
 
     def get_recent_tasks(self, limit: int = 5) -> list[TaskModel]:
         """获取最近任务"""

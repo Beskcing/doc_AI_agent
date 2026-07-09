@@ -38,6 +38,7 @@ interface DiskUsage {
   uploads_mb: number
   total_mb: number
   output_task_count: number
+  orphaned_count: number
 }
 
 const Dashboard: React.FC = () => {
@@ -80,8 +81,9 @@ const Dashboard: React.FC = () => {
     try {
       const res = await cleanupOldTasks({ older_than_days: cleanupDays })
       const result = res.data.data
+      const orphanInfo = result.orphaned_count > 0 ? `，含 ${result.orphaned_count} 个孤儿目录` : ''
       message.success(
-        `已清理 ${result.deleted_count} 个任务输出目录，释放 ${result.freed_mb} MB（共扫描 ${result.scanned_count} 个任务）`
+        `已清理 ${result.deleted_count} 个目录，释放 ${result.freed_mb} MB（扫描 ${result.scanned_count} 个${orphanInfo}）`
       )
       setCleanupModalOpen(false)
       // 刷新数据
@@ -141,7 +143,7 @@ const Dashboard: React.FC = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <h2 style={{ margin: 0 }}>工作台</h2>
         <Space>
-          <Tooltip title={diskUsage ? `磁盘占用: ${formatDiskSize(diskUsage.total_mb)}（${diskUsage.output_task_count} 个任务目录）` : '加载中...'}>
+          <Tooltip title={diskUsage ? `磁盘占用: ${formatDiskSize(diskUsage.total_mb)}（${diskUsage.output_task_count} 个目录，含 ${diskUsage.orphaned_count} 个孤儿目录）` : '加载中...'}>
             <Button icon={<HddOutlined />}>
               磁盘 {diskUsage ? formatDiskSize(diskUsage.total_mb) : '...'}
             </Button>
@@ -239,7 +241,10 @@ const Dashboard: React.FC = () => {
         </div>
         <p style={{ marginTop: 12, color: '#888', fontSize: 12 }}>
           当前磁盘占用: {diskUsage ? formatDiskSize(diskUsage.total_mb) : '...'}，
-          {diskUsage ? `${diskUsage.output_task_count} 个任务目录` : ''}
+          {diskUsage ? `${diskUsage.output_task_count} 个目录` : ''}
+          {diskUsage && diskUsage.orphaned_count > 0
+            ? `（含 ${diskUsage.orphaned_count} 个孤儿目录，无 DB 记录）`
+            : ''}
         </p>
       </Modal>
     </div>
