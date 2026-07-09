@@ -559,11 +559,11 @@ class PipelineService:
         """将标准号转换为注册表 key 格式
 
         Examples:
-            "GB/T 1.1" → "gbt_1_1"
+            "GB/T 1.1" → "gbt_1.1"
             "GB/T 9704" → "gbt_9704"
-            "GB 5009.225" → "gb_5009_225"
+            "GB 5009.225" → "gb_5009.225"
         """
-        key = standard.lower().replace("/", "").replace(" ", "_").replace("-", "_").replace(".", "_")
+        key = standard.lower().replace("/", "").replace(" ", "_").replace("-", "_")
         while "__" in key:
             key = key.replace("__", "_")
         return key.strip("_")

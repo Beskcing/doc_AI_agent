@@ -347,7 +347,7 @@ def _is_standard_name_line(text, index, paragraphs):
         if next_text:
             # Only match real chapter headings like "1  范围" (number + 2+ spaces + Chinese title)
             # Exclude variable definitions like "1 000" or "1.5 mL"
-            if re.match(r"^\d+\s{2,}[\u4e00-\u9fff]", next_text):
+            if re.match(r"^\d+\s+[\u4e00-\u9fff]", next_text):
                 return True
             break
     return False

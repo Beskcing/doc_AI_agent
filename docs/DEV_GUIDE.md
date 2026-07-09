@@ -1,0 +1,632 @@
+# 国标文档排版智能体 — 迭代优化文档
+
+## 一、架构总览
+
+### 1.1 模块依赖图
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        前端 (React + Ant Design)                 │
+│  UploadPage / TasksPage / ChatPage / TemplatesPage / KbPage     │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │ HTTP REST API
+┌──────────────────────────▼──────────────────────────────────────┐
+│                    FastAPI 路由层                                │
+│  routers/upload.py  routers/tasks.py  routers/templates.py       │
+│  routers/chat.py    routers/kb.py     routers/formatters.py      │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────────────────────────────────┐
+│                     服务层                                       │
+│  PipelineService ── 核心排版流程                                 │
+│  PreviewService  ── PDF/DOCX 预览                                │
+│  ContentEditService ── 文档内容编辑                              │
+│  ServiceDeps     ── LLM/RAG/Prompts 依赖注入                     │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────────────────────────────────┐
+│                     工具链                                       │
+│  mineru_parser │ docx_style_extractor │ docx_styler              │
+│  gbt_docx_formatter │ markdown_cleaner │ pandoc_converter       │
+│  content_normalizer │ html_table_preserver │ docx_normalizer    │
+│  formatters/ ── 可扩展 Formatter 注册系统                        │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────────────────────────────────┐
+│                   基础设施                                       │
+│  LLM Client (GLM-4/Qwen) │ RAG (Chroma + BM25)                  │
+│  DB (SQLite + SQLAlchemy) │ LangGraph 工作流                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 1.2 数据流全景
+
+```
+PDF 文件
+   │
+   ▼
+MinerUParser (PDF → Markdown + 原始DOCX)
+   │
+   ├──→ mineru_docx_path (关键！决定是否走 Formatter 路径)
+   │
+   ▼
+IntentAnalysis (LLM: 识别文档类型/标准/特殊元素)
+   │
+   ▼
+MarkdownCleaner (规则 + LLM 审查 + ContentNormalizer)
+   │
+   ▼
+┌── Style Extraction ──┐
+│  有模板 → 读DB模板JSON │
+│  无模板 → LLM+RAG生成  │  ← 结果可能被 Formatter 覆盖
+└──────────────────────┘
+   │
+   ▼
+┌── 管线路由 (pipeline_service.py L148-217) ──┐
+│                                               │
+│  有 mineru_docx?                               │
+│    ├── 无模板 + 有注册Formatter → Formatter    │
+│    ├── 无模板 + 无Formatter     → DocxStyler   │
+│    └── 有模板                   → DocxStyler   │
+│                                               │
+│  无 mineru_docx?                               │
+│    └── Pandoc降级 → DocxStyler                 │
+└───────────────────────────────────────────────┘
+   │
+   ▼
+DocxStyler / GbtDocxFormatter → 输出 DOCX
+   │
+   ▼
+最终 Word 文档
+```
+
+### 1.3 管线路由优先级
+
+```
+手动选择模板  >  注册 Formatter  >  自动匹配模板  >  LLM 生成
+     │                │                  │              │
+  "template"      "formatter"        "template"       "llm"
+```
+
+路由逻辑位于 `src/api/services/pipeline_service.py` 的 `process_task()` 方法（L91-233）。
+
+### 1.4 关键文件索引
+
+| 文件 | 职责 |
+|------|------|
+| `src/api/services/pipeline_service.py` | 核心管线路由 + 所有排版分支 |
+| `src/tools/formatters/registry.py` | Formatter 自动发现 + 注册表 |
+| `src/tools/formatters/base.py` | Formatter 抽象基类 |
+| `src/tools/formatters/gbt_1_1.py` | GB/T 1.1 硬编码格式化器（唯一注册的 Formatter） |
+| `src/tools/docx_style_extractor.py` | 模板 DOCX 样式提取器 |
+| `src/tools/docx_styler.py` | 通用样式渲染器（LLM/模板路径共用） |
+| `src/tools/docx_normalizer.py` | DOCX 内容规整（日期合并/标题合并/TOC删除） |
+| `src/tools/content_normalizer.py` | Markdown 层内容规整 |
+| `src/api/routers/templates.py` | 模板 CRUD API |
+| `src/api/models.py` | API 模型 + StandardOption 枚举 |
+| `frontend/src/pages/UploadPage.tsx` | 上传页面 + 标准选择器 |
+| `frontend/src/pages/TemplatesPage.tsx` | 模板管理页面 + 编辑器面板 |
+| `configs/settings.yaml` | 全局配置（LLM/RAG/MinerU 等） |
+| `prompts/style_extraction_prompt.md` | LLM 样式提取 Prompt |
+| `prompts/intent_parsing_prompt.md` | 意图分析 Prompt |
+
+---
+
+## 二、新增 Formatter（硬编码标准格式）
+
+### 2.1 何时用此路径
+
+当某个国标标准的排版规范**明确且固定**，无需依赖 LLM 或用户模板时，推荐实现硬编码 Formatter。优势：
+
+- 零幻觉，排版结果可预测
+- 不依赖 RAG 知识库
+- 不受 LLM 输出质量波动影响
+- 性能最优（无 LLM 调用）
+
+### 2.2 BaseDocxFormatter 基类
+
+`src/tools/formatters/base.py`：
+
+```python
+class BaseDocxFormatter(ABC):
+    standard_id: str = ""       # 注册表 key（如 "gbt_9704"）
+    display_name: str = ""      # 显示名称（如 "GB/T 9704 党政机关公文格式"）
+
+    @abstractmethod
+    def process(self, input_path: str, output_path: str) -> StyleReport:
+        """对 DOCX 文件执行格式修正
+
+        Args:
+            input_path: 输入 DOCX 路径（MinerU 原始输出）
+            output_path: 输出 DOCX 路径
+
+        Returns:
+            StyleReport 包含：
+            - success: bool          是否成功
+            - paragraphs_styled: int 应用样式段落数
+            - tables_styled: int     应用样式表格数
+            - headings_styled: int   应用样式标题数
+            - warnings: list[str]    警告信息
+            - output_path: str       输出文件路径
+        """
+        ...
+```
+
+子类**必须**实现 `process()` 方法。可选的辅助方法：
+- `_apply_page_setup(doc)` — 页面设置
+- `_apply_default_fonts(doc)` — 文档默认字体
+- `_normalize_content(doc)` — 内容规整
+- `_classify_paragraph(...)` — 段落角色分类
+- `_apply_*_format(...)` — 各类角色格式应用
+- `_format_tables(doc)` — 表格格式修正
+- `_center_images(doc)` — 图片居中
+
+参考 `gbt_1_1.py`（976 行）的完整实现。
+
+### 2.3 注册机制
+
+**1. 使用 `@register_formatter` 装饰器：**
+
+```python
+from src.tools.formatters.base import BaseDocxFormatter
+from src.tools.formatters.registry import register_formatter
+from src.models.document_schema import StyleReport
+
+@register_formatter
+class Gbt9704Formatter(BaseDocxFormatter):
+    standard_id = "gbt_9704"
+    display_name = "GB/T 9704 党政机关公文格式"
+
+    def process(self, input_path: str, output_path: str) -> StyleReport:
+        # 格式化逻辑
+        ...
+        return StyleReport(
+            success=True,
+            paragraphs_styled=120,
+            tables_styled=5,
+            output_path=output_path,
+        )
+```
+
+**2. 放入 `src/tools/formatters/` 目录：**
+
+```
+src/tools/formatters/
+├── __init__.py
+├── base.py
+├── registry.py
+├── gbt_1_1.py          ← 现有
+└── gbt_9704.py         ← 新增（自动发现）
+```
+
+**3. 自动发现机制：**
+
+`registry.py` 的 `_ensure_discovered()` 在首次调用时自动扫描 `formatters/` 目录，用 `pkgutil.iter_modules` 查找所有模块（跳过 `_` 开头和 `test_` 开头），`importlib.import_module` 加载。装饰器 `@register_formatter` 在模块导入时自动执行注册。
+
+无需手动配置任何注册表文件。
+
+### 2.4 standard_id 命名规范
+
+`_standard_to_registry_key()` 转换规则（`pipeline_service.py` L557-569）：
+
+```python
+key = standard.lower()       # 全小写
+       .replace("/", "")     # 去掉斜杠
+       .replace(" ", "_")    # 空格 → 下划线
+       .replace("-", "_")    # 横杠 → 下划线
+while "__" in key:
+    key = key.replace("__", "_")  # 压缩重复下划线
+return key.strip("_")
+```
+
+**映射示例：**
+
+| 用户选择的标准 | `standard_id` |
+|:---|:---|
+| `GB/T 1.1` | `gbt_1.1` |
+| `GB/T 9704` | `gbt_9704` |
+| `GB 5009.225` | `gb_5009.225` |
+| `GB/T 7713` | `gbt_7713` |
+
+### 2.5 前后端标准选项同步
+
+新增 Formatter 后，必须同步补全两处：
+
+**后端 `src/api/models.py`：**
+
+```python
+class StandardOption(str, Enum):
+    GBT_1_1 = "GB/T 1.1"
+    GBT_9704 = "GB/T 9704"
+    GBT_7713 = "GB/T 7713"
+    GBT_5009 = "GB 5009.225"       # ← 新增
+    CUSTOM = "custom"
+```
+
+**前端 `frontend/src/pages/UploadPage.tsx`：**
+
+```typescript
+const [standards, setStandards] = useState([
+    { value: 'GB/T 1.1', label: '标准化工作导则 (GB/T 1.1)' },
+    { value: 'GB/T 9704', label: '党政机关公文格式' },
+    { value: 'GB/T 7713', label: '科技报告编写格式' },
+    { value: 'GB 5009.225', label: '食品标准 (GB 5009.225)' },  // ← 新增
+    { value: 'custom', label: '自定义规范' },
+])
+```
+
+### 2.6 完整示例：新增 GB/T 9704 Formatter
+
+```python
+# 文件：src/tools/formatters/gbt_9704.py
+"""GB/T 9704 DOCX 格式修正器
+
+党政机关公文格式（代替 GB/T 9704—1999）
+"""
+from docx import Document
+from src.tools.formatters.base import BaseDocxFormatter
+from src.tools.formatters.registry import register_formatter
+from src.models.document_schema import StyleReport
+
+@register_formatter
+class Gbt9704Formatter(BaseDocxFormatter):
+    standard_id = "gbt_9704"
+    display_name = "GB/T 9704 党政机关公文格式"
+
+    def process(self, input_path: str, output_path: str) -> StyleReport:
+        doc = Document(input_path)
+
+        self._apply_page_setup(doc)
+        self._apply_default_fonts(doc)
+
+        # 逐段分类并应用样式
+        for para in doc.paragraphs:
+            role = self._classify_paragraph(doc, para)
+            if role == "heading":
+                self._apply_heading_format(doc, para)
+            elif role == "body":
+                self._apply_body_format(doc, para)
+            # ... 更多角色
+
+        self._format_tables(doc)
+        doc.save(output_path)
+
+        return StyleReport(
+            success=True,
+            paragraphs_styled=len(doc.paragraphs),
+            tables_styled=len(doc.tables),
+            output_path=output_path,
+        )
+
+    def _apply_body_format(self, doc, para):
+        """正文：仿宋 16pt，两端对齐，首行缩进 2 字符"""
+        # ... 实现
+        pass
+
+    # ... 更多辅助方法
+```
+
+---
+
+## 三、新增标准支持（LLM + RAG 路径）
+
+### 3.1 何时走此路径
+
+当标准没有注册 Formatter，且用户未选择模板时，管线降级到 LLM + RAG 路径。适合：
+
+- 标准格式变化多、难以硬编码
+- 快速支持新标准，无需开发
+- 用户可自定义 Prompt 调整行为
+
+### 3.2 补充知识库文档
+
+1. 准备标准排版规范 Markdown 文档，放入 `knowledge_data/raw_docs/`
+2. 文档应包含：字体规范、字号规范、标题格式、正文格式、表格规范、页边距等
+3. 运行初始化：
+
+```bash
+python -m scripts.init_knowledge_base
+```
+
+**文档格式建议：**
+
+```markdown
+# GB/T 9704 党政机关公文格式
+
+## 页面设置
+- 纸张：A4（210mm × 297mm）
+- 上边距：37mm ± 1mm
+- 下边距：35mm ± 1mm
+- 左边距：28mm ± 1mm
+- 右边距：26mm ± 1mm
+
+## 字体规范
+- 正文：仿宋_GB2312，3号字（16pt）
+- 一级标题：黑体，3号字（16pt）
+- 二级标题：楷体_GB2312，3号字（16pt）
+
+## 段落格式
+- 正文：两端对齐，首行缩进 2 字符
+- 行距：固定值 28 磅
+...
+```
+
+### 3.3 调优样式提取 Prompt
+
+`prompts/style_extraction_prompt.md` 中的关键占位符：
+
+| 占位符 | 来源 | 说明 |
+|--------|------|------|
+| `{document_type}` | LLM 意图分析 | 文档类型描述 |
+| `{detected_standard}` | 用户选择或 LLM 检测 | 目标标准号 |
+| `{special_elements}` | LLM 意图分析 | 特殊元素（表格/公式/化学式） |
+| `{rag_context}` | RAG 检索结果 | 排版规范原文片段 |
+| `{few_shot_examples}` | 数据库中匹配的模板示例 | Few-shot 样例 |
+
+### 3.4 RAG 调优参数
+
+`configs/settings.yaml` 中：
+
+```yaml
+rag:
+  chunk_size: 700              # 调大→更多上下文但可能稀释精度
+  chunk_overlap_ratio: 0.15    # 调大→减少信息断层
+  top_k: 5                     # 调大→更多参考片段
+  bm25_weight: 0.3             # 调大→更重视关键词匹配
+  vector_weight: 0.7           # 调大→更重视语义匹配
+```
+
+---
+
+## 四、样式提取器优化
+
+### 4.1 DocxStyleExtractor 提取原理
+
+`src/tools/docx_style_extractor.py`（1640 行）直接从 DOCX XML 提取样式，无 LLM 参与：
+
+| 提取方法 | 策略 | 关键代码 |
+|----------|------|----------|
+| `_extract_page_layout` | 读 section 属性 | `section.page_width / page_height` |
+| `_extract_cover_style` | 前 20 段中找 ≥14pt + 居中 | `_is_cover_or_preface()` 启发式 |
+| `_extract_preface_style` | 精确匹配「前言」「引言」 | 全文扫描 |
+| `_extract_heading_styles` | 先读样式定义表，降级正则匹配 | `HEADING_STYLE_MAP` + `classify_heading_level_by_content` |
+| `_extract_body_style` | 样式表 Normal + 全文档众数 | `Counter` 取 `most_common` |
+| `_extract_table_style` | 所有表格众数 | 边框/对齐/单元格属性 |
+| `_extract_font_from_paragraph` | 读 `w:rPr/w:rFonts` 的 `eastAsia`/`ascii` | 深层 XML 解析 |
+
+### 4.2 已知局限
+
+| 局限 | 说明 | 改进方向 |
+|------|------|----------|
+| 封面检测 | 仅靠字号+对齐，可能漏判 | 增加关键字匹配（"国家标准"/"GB"） |
+| 标题级别 | 依赖样式名或正则，无样式时可能误判 | 引入字体/字号作为辅助判断 |
+| 正文字体 | 直接格式覆盖样式定义的情况未处理 | 增加 inline formatting vs style 优先级判断 |
+| 表格不一致 | 取众数，不同表格格式差异被忽略 | 表格分角色（数据表/说明表） |
+| 首行缩进 | 依赖 `first_line_indent` 字段 | 无缩进的文档需人工补充 |
+
+### 4.3 段落角色识别增强
+
+当前角色分类依赖硬编码规则。如需扩展，修改：
+
+- `src/tools/content_pattern_matcher.py` — 正则模式定义
+- `src/tools/docx_style_extractor.py` — `_classify_heading_level_by_content()` 等方法
+
+---
+
+## 五、管线性能优化
+
+### 5.1 MinerU 解析优化
+
+```yaml
+# configs/settings.yaml
+mineru:
+  mode: "online"              # online 比 local 更稳定
+  model_version: "vlm"        # vlm 质量最高
+  poll_interval: 5            # 轮询间隔（秒），避免频繁请求
+  poll_timeout: 600           # 大文件可能需要更长时间
+```
+
+MinerU 是管线中最耗时的环节（大 PDF 可能 5~10 分钟），建议：
+
+- 缓存已解析结果：相同文件不重复解析
+- 批量上传时并发提交 MinerU 任务
+
+### 5.2 LLM 调用合并
+
+当前管线至少 3 次 LLM 调用：
+1. 意图分析（`_analyze_intent`）
+2. Markdown 审查（`MarkdownCleaner`）
+3. 样式提取（`_generate_style_config`）
+
+优化方向：
+- Formatter 路径跳过步骤 3（已实现，L164 覆盖 `style_config`）
+- 合并步骤 1+3 为一次调用（需调整 Prompt）
+- 小文档可跳过意图分析（用默认值）
+
+### 5.3 大文档分页处理
+
+前端 PDF 预览已实现分页加载（`PreviewService`），后端可考虑：
+
+- DOCX 渲染分页处理（100+ 页文档避免内存溢出）
+- Markdown 清洗分段处理（当前 `markdown_content[:3000]` 只取前 3000 字做意图分析）
+
+---
+
+## 六、测试与质量保障
+
+### 6.1 测试结构
+
+```
+tests/
+├── unit/           # 单元测试
+│   ├── test_style_config.py
+│   ├── test_markdown_cleaner.py
+│   ├── test_content_normalizer.py
+│   ├── test_docx_style_extractor.py
+│   ├── test_pipeline_service.py
+│   └── test_gbt_formatter.py
+├── integration/    # 集成测试
+│   ├── test_api.py
+│   └── test_pipeline.py
+├── e2e/            # E2E 测试
+│   └── ... (32 个文件)
+├── fixtures/       # 测试数据
+│   ├── sample.pdf
+│   └── ...
+└── conftest.py     # Pytest 全局配置
+```
+
+### 6.2 运行测试
+
+```bash
+# 全部测试
+python -m pytest tests/ -v
+
+# 单元测试
+python -m pytest tests/unit/ -v
+
+# 单个文件
+python -m pytest tests/unit/test_gbt_formatter.py -v
+
+# 覆盖率
+python -m pytest tests/ --cov=src --cov-report=html
+```
+
+### 6.3 Formatter 测试用例模板
+
+```python
+# tests/unit/test_gbt_9704_formatter.py
+import pytest
+from src.tools.formatters.gbt_9704 import Gbt9704Formatter
+
+
+class TestGbt9704Formatter:
+    def test_standard_id(self):
+        fmt = Gbt9704Formatter()
+        assert fmt.standard_id == "gbt_9704"
+
+    def test_page_setup(self, tmp_path):
+        # 准备测试 DOCX → 执行 process → 验证输出
+        ...
+```
+
+### 6.4 排版结果自动化比对
+
+编写验证脚本，检查输出 DOCX 的关键格式点：
+
+```python
+def verify_gbt_output(docx_path: str) -> dict:
+    """验证 DOCX 是否符合 GB/T 1.1 规范"""
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    doc = Document(docx_path)
+    issues = []
+
+    # 1. 页面
+    s = doc.sections[0]
+    w = s.page_width / 36000
+    h = s.page_height / 36000
+    if abs(w - 210) > 1 or abs(h - 297) > 1:
+        issues.append(f"页面尺寸异常: {w:.0f}x{h:.0f}mm")
+
+    # 2. 正文格式
+    for p in doc.paragraphs:
+        # 根据角色验证字体/字号/对齐/缩进
+        ...
+
+    return {"pass": len(issues) == 0, "issues": issues}
+```
+
+### 6.5 前端编译检查
+
+```bash
+cd frontend
+npm run tsc -- --noEmit   # TypeScript 编译检查
+npm run lint              # ESLint 检查
+```
+
+---
+
+## 七、数据库与迁移
+
+### 7.1 数据模型
+
+核心表位于 `src/db/models.py`：
+
+| 表名 | 说明 |
+|------|------|
+| `tasks` | 排版任务 |
+| `style_templates` | 样式模板（含 `standard` 字段） |
+| `chat_messages` | 对话消息 |
+| `kb_documents` | 知识库文档 |
+
+### 7.2 Alembic 迁移
+
+```bash
+# 生成迁移脚本
+alembic revision --autogenerate -m "描述"
+
+# 执行迁移
+alembic upgrade head
+
+# 回滚
+alembic downgrade -1
+```
+
+### 7.3 模板标准号匹配策略
+
+`StyleTemplateCRUD.match_by_standard()` 三级匹配（`src/db/crud.py`）：
+
+1. **精确匹配**：`standard` 字段与目标标准号完全一致
+2. **模糊匹配**：去除空格/符号后比较（如 `GB/T1.1` ↔ `GBT 1.1`）
+3. **名称匹配**：标准号关键词在模板名称中出现
+
+---
+
+## 八、变更记录
+
+| 日期 | 类型 | 摘要 |
+|------|------|------|
+| 2026-07-08 | docs | 新增 USER_GUIDE.md 使用文档 + DEV_GUIDE.md 迭代优化文档 |
+| 2026-07-08 | fix | GbtDocxFormatter `_is_standard_name_line` 正则 `\s{2,}` → `\s+` |
+| 2026-07-08 | fix | `_standard_to_registry_key` 去掉 `.replace(".", "_")`，修复 `gbt_1.1` → `gbt_1_1` 映射错误 |
+| 2026-07-08 | fix | TaskDetailPage 修正样式 React State 时序 Bug |
+| 2026-07-08 | fix | TemplatesPage 手动创建 extractedConfig 空指针崩溃修复 |
+| 2026-07-08 | feat | DocxNormalizer: DOCX 层内容规整 |
+| 2026-07-08 | feat | Formatter 注册系统: BaseDocxFormatter + Registry 自动发现 |
+| 2026-07-08 | feat | 格式规范分类重构: StyleTemplateModel 添加 standard 字段 + 三级匹配 |
+| 2026-07-08 | feat | Pipeline 路由优先级显式化: applied_format 来源追溯 |
+| 2026-07-08 | feat | 前端 TemplatesPage 样式编辑器增强 |
+| 2026-07-07 | feat | 工程化 P0~P3: 重试/超时/CI/限流/Dockerfile/Makefile |
+| 2026-07-07 | refactor | TaskManager 门面拆分: PipelineService/PreviewService/ContentEditService |
+| 2026-07-07 | config | LLM Provider 从 Qwen 切换为智谱 AI (GLM-4) |
+| 2026-07-06 | feat | PDF 对比预览 + 分页加载 |
+| 2026-07-06 | feat | 文档内容编辑 (TinyMCE + LLM 对话) |
+| 2026-07-06 | feat | 四大智能排版 + 模板管理 + 附录样式分离 |
+
+---
+
+## 九、常见开发问题
+
+### Q1: 新增 Formatter 后未生效
+
+1. 确认文件在 `src/tools/formatters/` 目录下（非子目录）
+2. 确认类有 `@register_formatter` 装饰器
+3. 确认 `standard_id` 与 `_standard_to_registry_key()` 输出一致
+4. 确认前后端标准选项已同步补全
+5. 重启后端服务（模块自动发现仅在首次调用时触发）
+
+### Q2: _generate_style_config 调了但结果未被使用
+
+这是预期行为：Formatter 路径在 L146 调了 `_generate_style_config`，但 L164 用 `_default_style_config()` 覆盖，实际不使用 LLM 生成的结果。
+
+### Q3: Pre-commit hooks 报错
+
+```bash
+# 手动运行
+pre-commit run --all-files
+ruff check src/ tests/ scripts/ --fix
+```
+
+`.pre-commit-config.yaml` 配置了 Ruff lint + format 检查。

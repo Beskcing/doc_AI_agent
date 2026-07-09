@@ -579,7 +579,7 @@ class GbtDocxFormatter(BaseDocxFormatter):
         for j in range(index + 1, min(index + 5, len(paragraphs))):
             next_text = paragraphs[j].text.strip()
             if next_text:
-                if re.match(r"^\d+\s{2,}[\u4e00-\u9fff]", next_text):
+                if re.match(r"^\d+\s+[\u4e00-\u9fff]", next_text):
                     return True
                 break
         return False
