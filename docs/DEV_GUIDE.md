@@ -7,13 +7,17 @@
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        前端 (React + Ant Design)                 │
+│  LoginPage / AuthGuard / AppLayout (role-based menu)            │
 │  UploadPage / TasksPage / ChatPage / TemplatesPage / KbPage     │
 └──────────────────────────┬──────────────────────────────────────┘
-                           │ HTTP REST API
+                           │ HTTP REST API (JWT Bearer)
 ┌──────────────────────────▼──────────────────────────────────────┐
 │                    FastAPI 路由层                                │
-│  routers/upload.py  routers/tasks.py  routers/templates.py       │
-│  routers/chat.py    routers/kb.py     routers/formatters.py      │
+│  routers/auth.py   routers/admin.py   routers/upload.py         │
+│  routers/tasks.py  routers/chat.py    routers/templates.py      │
+│  routers/kb.py     routers/config.py  routers/formatters.py     │
+│                                                                  │
+│  middleware/auth.py — JWT verify / get_current_user/admin       │
 └──────────────────────────┬──────────────────────────────────────┘
                            │
 ┌──────────────────────────▼──────────────────────────────────────┐
@@ -35,7 +39,9 @@
 ┌──────────────────────────▼──────────────────────────────────────┐
 │                   基础设施                                       │
 │  LLM Client (GLM-4/Qwen) │ RAG (Chroma + BM25)                  │
-│  DB (SQLite + SQLAlchemy) │ LangGraph 工作流                     │
+│  DB (SQLite/PostgreSQL)  │ Celery + Redis (异步)                │
+│  JWT + bcrypt (认证)     │ Alembic (迁移)                        │
+│  LangGraph 工作流         │ 用户隔离文件系统                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -95,15 +101,27 @@ DocxStyler / GbtDocxFormatter → 输出 DOCX
 | 文件 | 职责 |
 |------|------|
 | `src/api/services/pipeline_service.py` | 核心管线路由 + 所有排版分支 |
+| `src/api/services/celery_app.py` | Celery 应用配置（Redis broker/backend） |
+| `src/api/services/pipeline_task.py` | Celery 异步任务（含 ThreadPoolExecutor 降级） |
+| `src/api/middleware/auth.py` | JWT 认证中间件（签发/验证/依赖注入） |
+| `src/api/routers/auth.py` | 用户注册/登录/Token 刷新 API |
+| `src/api/routers/admin.py` | 管理员 API（用户 CRUD + 级联删除） |
+| `src/db/crud.py` | 数据访问层（含 UserCRUD / TaskCRUD / ChatSessionCRUD 等） |
+| `src/db/models.py` | 8 张表 ORM 模型（含 UserModel） |
+| `src/utils/file_utils.py` | 文件系统工具（按 user_id 隔离的路径） |
 | `src/tools/formatters/registry.py` | Formatter 自动发现 + 注册表 |
 | `src/tools/formatters/base.py` | Formatter 抽象基类 |
-| `src/tools/formatters/gbt_1_1.py` | GB/T 1.1 硬编码格式化器（唯一注册的 Formatter） |
+| `src/tools/formatters/gbt_1_1.py` | GB/T 1.1 硬编码格式化器 |
 | `src/tools/docx_style_extractor.py` | 模板 DOCX 样式提取器 |
-| `src/tools/docx_styler.py` | 通用样式渲染器（LLM/模板路径共用） |
-| `src/tools/docx_normalizer.py` | DOCX 内容规整（日期合并/标题合并/TOC删除） |
+| `src/tools/docx_styler.py` | 通用样式渲染器 |
+| `src/tools/docx_normalizer.py` | DOCX 内容规整 |
 | `src/tools/content_normalizer.py` | Markdown 层内容规整 |
 | `src/api/routers/templates.py` | 模板 CRUD API |
-| `src/api/models.py` | API 模型 + StandardOption 枚举 |
+| `src/api/models.py` | API 模型 + StandardOption 枚举 + 认证模型 |
+| `frontend/src/App.tsx` | 前端路由 + AuthGuard 守卫 |
+| `frontend/src/pages/LoginPage.tsx` | 登录/注册页面 |
+| `frontend/src/components/AppLayout.tsx` | 布局组件（含 role-based 菜单） |
+| `frontend/src/services/api.ts` | Axios 封装（自动 Bearer token + 401 刷新） |
 | `frontend/src/pages/UploadPage.tsx` | 上传页面 + 标准选择器 |
 | `frontend/src/pages/TemplatesPage.tsx` | 模板管理页面 + 编辑器面板 |
 | `configs/settings.yaml` | 全局配置（LLM/RAG/MinerU 等） |
@@ -552,14 +570,18 @@ npm run lint              # ESLint 检查
 
 ### 7.1 数据模型
 
-核心表位于 `src/db/models.py`：
+核心表位于 `src/db/models.py`（共 8 张表）：
 
-| 表名 | 说明 |
-|------|------|
-| `tasks` | 排版任务 |
-| `style_templates` | 样式模板（含 `standard` 字段） |
-| `chat_messages` | 对话消息 |
-| `kb_documents` | 知识库文档 |
+| 表名 | 说明 | user_id 隔离 |
+|------|------|:---:|
+| `users` | 用户账号（username/password_hash/role/is_active） | — |
+| `tasks` | 排版任务 | Y |
+| `chat_sessions` | 对话会话 | Y |
+| `chat_messages` | 对话消息（级联 session） | Y |
+| `style_templates` | 样式模板（user_id=NULL 为系统预置） | Y |
+| `style_adjustment_history` | 样式调整历史 | Y |
+| `kb_documents` | 知识库文档（全局共享） | — |
+| `system_config` | 系统配置（全局单条记录） | — |
 
 ### 7.2 Alembic 迁移
 
@@ -584,11 +606,344 @@ alembic downgrade -1
 
 ---
 
-## 八、变更记录
+## 八、SaaS 多用户开发模式
+
+### 8.1 多用户数据隔离总览
+
+系统通过三层隔离实现多用户 SaaS 架构：
+
+```
+┌───────────────────────────────────────┐
+│         前端 (JWT Bearer Token)        │
+│  每个请求自动携带 Authorization 头     │
+└───────────────┬───────────────────────┘
+                │
+┌───────────────▼───────────────────────┐
+│       FastAPI 中间件 (auth.py)         │
+│  get_current_user() → 从 JWT 提取用户  │
+│  注入到路由参数 current_user           │
+└───────────────┬───────────────────────┘
+                │
+     ┌──────────┼──────────┐
+     ▼          ▼          ▼
+┌─────────┐ ┌──────┐ ┌──────────┐
+│  DB 层   │ │文件层│ │ 路由层   │
+│user_id  │ │user_ │ │role==    │
+│WHERE    │ │id/   │ │"admin"? │
+│过滤     │ │目录  │ │全局:自己 │
+└─────────┘ └──────┘ └──────────┘
+```
+
+**隔离粒度：**
+
+| 层级 | 实现位置 | 机制 |
+|------|---------|------|
+| 数据库 | `src/db/crud.py` 各 CRUD 的 `list_*` 方法 | `user_id=xxx` 查询过滤 |
+| 文件系统 | `src/utils/file_utils.py` | `data/uploads/{user_id}/` 和 `data/output/{user_id}/` 目录隔离 |
+| 路由 | `src/api/routers/*.py` | `Depends(get_current_user)` 注入 + `role=="admin"` 判断 |
+
+### 8.2 认证鉴权开发模式
+
+#### JWT 认证流程
+
+```
+用户登录 → POST /api/auth/login
+    │
+    ▼
+验证 bcrypt 密码 → 检查 is_active
+    │
+    ▼
+签发 JWT: access_token (30min) + refresh_token (7d)
+payload: { sub: user_id, username, role }
+    │
+    ▼
+前端存储 token → axios interceptor 自动注入 Authorization: Bearer {token}
+    │
+    ▼
+get_current_user() 从 HTTPBearer 提取 token → decode JWT → 查 DB → 返回 UserModel
+```
+
+**关键代码位置：**
+
+| 组件 | 文件 | 行/方法 |
+|------|------|--------|
+| Token 签发 | `src/api/middleware/auth.py` | `create_access_token()` / `create_refresh_token()` |
+| Token 验证 | `src/api/middleware/auth.py` | `decode_token()` |
+| 密码哈希 | `src/api/middleware/auth.py` | `hash_password()` / `verify_password()` — bcrypt cost=12 |
+| 用户依赖注入 | `src/api/middleware/auth.py` | `get_current_user()` — 从 HTTPBearer 提取 token，返回 UserModel |
+| 管理员依赖注入 | `src/api/middleware/auth.py` | `get_current_admin()` — 额外校验 `role=="admin"`，否则 403 |
+| 路由使用 | `src/api/routers/*.py` | `current_user: UserModel = Depends(get_current_user)` |
+
+#### 给新路由添加认证
+
+```python
+from src.api.middleware.auth import get_current_user, get_current_admin
+from src.db.models import UserModel
+
+# 普通用户可访问（自动按 user_id 过滤）
+@router.get("/my-resource")
+async def list_my_resource(
+    current_user: UserModel = Depends(get_current_user),
+):
+    user_id = None if current_user.role == "admin" else current_user.id
+    with get_db_session() as db:
+        items, total = MyCRUD.list_items(db, user_id=user_id)
+    return ResponseModel(data={"items": items, "total": total})
+
+# 仅管理员可访问
+@router.delete("/admin/resource/{id}")
+async def admin_delete(
+    resource_id: str,
+    _admin: UserModel = Depends(get_current_admin),  # 非 admin 自动 403
+):
+    ...
+```
+
+**Admin 全局视图标准模式：**
+
+```python
+# 在所有列表/统计路由中使用此模式
+user_id = None if current_user.role == "admin" else current_user.id
+```
+
+`user_id=None` 传给 CRUD 方法时表示"查全部"，`user_id=xxx` 表示"只看自己的"。
+
+### 8.3 管理员路由开发模式
+
+管理员路由集中于 `src/api/routers/admin.py`，所有端点受 `get_current_admin` 保护。
+
+**创建管理员 API 端点模板：**
+
+```python
+from src.api.middleware.auth import get_current_admin, hash_password
+
+@router.post("/admin/resource")
+async def admin_create(
+    request: SomeRequest,
+    _admin: UserModel = Depends(get_current_admin),  # 仅管理员
+):
+    ...
+```
+
+**级联删除模式**（删除用户时同步清理所有关联数据）：
+
+```python
+# src/db/crud.py → UserCRUD.delete_cascade()
+def delete_cascade(db: Session, user_id: str):
+    db.query(ChatMessageModel).filter(...).delete()
+    db.query(ChatSessionModel).filter(...).delete()
+    db.query(TaskModel).filter(...).delete()
+    db.query(StyleTemplateModel).filter(...).delete()
+    db.query(StyleAdjustmentHistoryModel).filter(...).delete()
+    db.query(UserModel).filter(UserModel.id == user_id).delete()
+    db.commit()
+```
+
+**安全规则：**
+
+- 不可删除 `role="admin"` 的用户（广告 API 返回 403）
+- 全局表 `kb_documents` / `system_config` 不参与级联删除
+- 文件系统数据需额外调用 `shutil.rmtree()` 清理
+
+### 8.4 Celery 异步任务队列
+
+#### 架构
+
+```
+FastAPI 路由 → TaskManager.submit_task()
+                    │
+                    ├── Celery 可用？─→ process_pipeline_task.delay(task_id) → Redis Queue
+                    │                                                              │
+                    └── Celery 不可用？─→ ThreadPoolExecutor.submit()               ▼
+                                                              │            Celery Worker
+                                                              │            (4 副本)
+                                                              ▼                │
+                                                       task_manager.process_task(task_id)
+```
+
+#### 关键文件
+
+| 文件 | 职责 |
+|------|------|
+| `src/tasks/celery_app.py` | Celery 实例配置（Redis broker, result backend, 序列化/时区/重试） |
+| `src/tasks/pipeline_task.py` | 排版任务定义（`@celery_app.task(max_retries=3, retry_delay=60)`） |
+| `scripts/run_worker.py` | Worker 启动脚本 |
+| `src/api/services/task_manager.py` L390-410 | 任务提交 + 降级分发 |
+
+#### 启动 Worker
+
+```bash
+# 单 Worker
+python -m scripts.run_worker
+
+# 或者 docker-compose 自动启动 4 副本
+# docker compose up -d → celery-worker-{1..4}
+
+# 指定并发数
+celery -A src.tasks.celery_app worker --concurrency=4
+```
+
+#### 降级机制
+
+当 Redis 不可用时，`submit_task()` 自动降级为 `ThreadPoolExecutor` 同步执行：
+
+```python
+# src/api/services/task_manager.py
+def _submit_via_celery_or_thread(task_id: str):
+    if _celery_available:
+        process_pipeline_task.delay(task_id)  # 异步
+    else:
+        THREAD_POOL.submit(task_manager.process_task, task_id)  # 线程池
+```
+
+### 8.5 文件系统用户隔离
+
+`src/utils/file_utils.py` 提供两个核心函数：
+
+```python
+# 用户上传隔离
+get_user_upload_dir(user_id) → data/uploads/{user_id}/
+
+# 用户输出隔离
+get_user_output_dir(user_id, task_id="") → data/output/{user_id}/{task_id}/
+```
+
+**目录结构示例：**
+
+```
+data/
+├── uploads/
+│   ├── user_a_id/           ← 用户 A 的上传文件
+│   │   ├── abc123.pdf
+│   │   └── abc123.meta
+│   └── user_b_id/           ← 用户 B 的上传文件
+│       └── def456.pdf
+├── output/
+│   ├── user_a_id/
+│   │   └── task_001/        ← 任务输出（.docx/.md/.json）
+│   └── user_b_id/
+│       └── task_002/
+└── templates/               ← 模板文件（全局，不属于用户）
+```
+
+**磁盘用量统计** 支持按 user_id 隔离：
+
+```python
+# task_manager.py
+def get_disk_usage(user_id: str | None = None) -> dict:
+    uploads_path = f"data/uploads/{user_id}/" if user_id else "data/uploads/"
+    output_path = f"data/output/{user_id}/" if user_id else "data/output/"
+    # 统计各目录大小
+```
+
+### 8.6 前端认证模式
+
+#### 路由守卫（AuthGuard）
+
+`frontend/src/App.tsx` 中 `AuthGuard` 组件保护所有需要登录的路由：
+
+```tsx
+// 未登录 → 重定向到 /login
+// 已登录 → 渲染子路由
+<AuthGuard>
+  <AppLayout>
+    <Routes>...</Routes>
+  </AppLayout>
+</AuthGuard>
+```
+
+#### Axios 拦截器
+
+`frontend/src/services/api.ts` 的双拦截器模式：
+
+```typescript
+// 请求拦截器：自动注入 Bearer Token
+api.interceptors.request.use(config => {
+  const token = localStorage.getItem('access_token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// 响应拦截器：401 → 自动刷新 token 或重定向登录
+api.interceptors.response.use(
+  response => response,
+  async error => {
+    if (error.response?.status === 401 && !error.config._retry) {
+      // 尝试 refresh_token 刷新
+      // 失败则清除 token 跳转 /login
+    }
+  }
+);
+```
+
+#### 角色菜单渲染
+
+`frontend/src/components/AppLayout.tsx` 根据 `userRole === 'admin'` 条件渲染菜单：
+
+```typescript
+const menuItems = [
+  { key: '/dashboard', label: '工作台' },
+  { key: '/upload', label: '上传排版' },
+  { key: '/tasks', label: '任务列表' },
+  { key: '/chat', label: '对话排版' },
+  { key: '/templates', label: '模板管理' },
+  // 仅管理员可见
+  ...(userRole === 'admin' ? [
+    { key: '/kb', label: '知识库' },
+    { key: '/config', label: '系统配置' },
+  ] : []),
+];
+```
+
+### 8.7 数据库迁移与用户数据
+
+Alembic 迁移链（`migrations/versions/`）：
+
+```
+base → 5e132870e319 (初始建表)
+     → 820ed49c4fca (添加 style_templates.standard 字段)
+     → 3a7f1c2d4e5f (新增 users 表 + 各表 user_id 列) ← SaaS 改造
+```
+
+**新增业务表时加入 user_id：**
+
+```python
+# Alembic 迁移脚本
+op.create_table(
+    "new_table",
+    sa.Column("id", sa.String(36), primary_key=True),
+    sa.Column("user_id", sa.String(36), nullable=False, index=True),  # ← 必须
+    ...
+)
+
+# ORM 模型
+class NewModel(Base):
+    __tablename__ = "new_table"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=...)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)  # ← 必须
+    created_by: Mapped["UserModel"] = relationship("UserModel")
+```
+
+**新增 CRUD 时加入 user_id 过滤：**
+
+```python
+@staticmethod
+def list_new_items(db: Session, page: int, page_size: int, user_id: str | None = None):
+    query = db.query(NewModel)
+    if user_id is not None:          # None = 管理员全局视图
+        query = query.filter(NewModel.user_id == user_id)
+    return query.offset((page-1)*page_size).limit(page_size).all()
+```
+
+---
+
+## 九、变更记录
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
-| 2026-07-08 | docs | 新增 USER_GUIDE.md 使用文档 + DEV_GUIDE.md 迭代优化文档 |
+| 2026-07-09 | feat | 多用户 SaaS 架构改造: JWT + bcrypt 认证, 7 表 user_id 隔离, PostgreSQL 支持, Celery + Redis 异步队列, 文件系统按 user_id 目录隔离, 前端 LoginPage/AuthGuard/role-based 菜单, 管理员全局视图 |
+| 2026-07-09 | feat | 管理员功能补全: 用户账号管理 API (CRUD/重置密码/禁用/级联删除), 管理员全局数据视图 (tasks/chat/stats/disk-usage 路由 admin 分支) |
+| 2026-07-09 | docs | 文档全面更新: AGENTS.md/USER_GUIDE.md/DEV_GUIDE.md 三个文档的 SaaS 多用户章节补全 |
 | 2026-07-08 | fix | GbtDocxFormatter `_is_standard_name_line` 正则 `\s{2,}` → `\s+` |
 | 2026-07-08 | fix | `_standard_to_registry_key` 去掉 `.replace(".", "_")`，修复 `gbt_1.1` → `gbt_1_1` 映射错误 |
 | 2026-07-08 | fix | TaskDetailPage 修正样式 React State 时序 Bug |
@@ -607,7 +962,7 @@ alembic downgrade -1
 
 ---
 
-## 九、常见开发问题
+## 十、常见开发问题
 
 ### Q1: 新增 Formatter 后未生效
 
@@ -630,3 +985,58 @@ ruff check src/ tests/ scripts/ --fix
 ```
 
 `.pre-commit-config.yaml` 配置了 Ruff lint + format 检查。
+
+### Q4: 新增业务表如何加入 user_id 隔离
+
+1. **模型**：`src/db/models.py` 中新表添加 `user_id = mapped_column(String(36), index=True)`
+2. **迁移**：`alembic revision --autogenerate -m "new_table_add_user_id"` → `alembic upgrade head`
+3. **CRUD**：`list_*` 方法添加 `user_id: str | None` 参数，非 None 时 WHERE 过滤
+4. **路由**：使用 `user_id = None if current_user.role == "admin" else current_user.id` 模式
+
+### Q5: 管理员 API 返回 403 怎么办
+
+1. 确认路由使用了 `Depends(get_current_admin)`（而非 `get_current_user`）
+2. 确认登录用户的 `role` 字段为 `"admin"`
+3. 检查 JWT token 中是否包含 `role` 字段（可在 https://jwt.io 解码查看）
+
+### Q6: Celery Worker 不处理任务
+
+```bash
+# 检查 Redis 是否运行
+redis-cli ping
+
+# 手动启动 Worker 查看日志
+celery -A src.tasks.celery_app worker --loglevel=info
+
+# 检查是否有积压任务
+celery -A src.tasks.celery_app inspect active
+```
+
+降级方案：系统自动检测 Celery 可用性，不可用时使用 ThreadPoolExecutor 同步执行。
+
+### Q7: Alembic 迁移与已有数据冲突
+
+如果数据库已有表（通过 `create_all` 创建），但 Alembic 迁移脚本尝试 `create_table`：
+
+```bash
+# 将当前数据库状态标记为已迁移（跳过已存在的表）
+alembic stamp head
+
+# 后续新增迁移正常进行
+```
+
+### Q8: 用户密码哈希/验证在哪里
+
+`src/api/middleware/auth.py`：
+
+```python
+import bcrypt
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
+```
+
+cost=12 在安全性与性能之间取得平衡（每次哈希约 200-300ms）。
