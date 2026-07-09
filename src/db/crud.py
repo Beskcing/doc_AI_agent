@@ -17,6 +17,7 @@ from src.db.models import (
     StyleTemplateModel,
     SystemConfigModel,
     TaskModel,
+    UserModel,
 )
 
 
@@ -450,5 +451,93 @@ class StyleAdjustmentHistoryCRUD:
         records = db.query(StyleAdjustmentHistoryModel).filter(StyleAdjustmentHistoryModel.task_id == task_id).all()
         for record in records:
             db.delete(record)
+        db.commit()
+        return True
+
+
+class UserCRUD:
+    """用户 CRUD（仅供管理员使用）"""
+
+    @staticmethod
+    def list_users(db: Session, page: int = 1, page_size: int = 20) -> tuple[list[UserModel], int]:
+        query = db.query(UserModel)
+        total = query.count()
+        users = query.order_by(UserModel.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        return users, total
+
+    @staticmethod
+    def get(db: Session, user_id: str) -> UserModel | None:
+        return db.query(UserModel).filter(UserModel.id == user_id).first()
+
+    @staticmethod
+    def get_by_username(db: Session, username: str) -> UserModel | None:
+        return db.query(UserModel).filter(UserModel.username == username).first()
+
+    @staticmethod
+    def create(db: Session, username: str, password_hash: str, role: str = "user") -> UserModel:
+        import uuid
+
+        user = UserModel(
+            id=str(uuid.uuid4()),
+            username=username,
+            password_hash=password_hash,
+            role=role,
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+
+    @staticmethod
+    def update(
+        db: Session,
+        user_id: str,
+        password_hash: str | None = None,
+        is_active: bool | None = None,
+        role: str | None = None,
+    ) -> UserModel | None:
+        user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        if not user:
+            return None
+        if password_hash is not None:
+            user.password_hash = password_hash
+        if is_active is not None:
+            user.is_active = is_active
+        if role is not None:
+            user.role = role
+        db.commit()
+        db.refresh(user)
+        return user
+
+    @staticmethod
+    def delete_cascade(db: Session, user_id: str) -> bool:
+        """删除用户及其所有关联数据（tasks/chat/模板/调整历史）
+
+        注意：不删除 kb_documents 和 system_config（全局共享）。
+        """
+        user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        if not user:
+            return False
+
+        # 删除关联的样式调整历史
+        db.query(StyleAdjustmentHistoryModel).filter(StyleAdjustmentHistoryModel.user_id == user_id).delete()
+
+        # 删除关联的聊天消息（by session）
+        sessions = db.query(ChatSessionModel).filter(ChatSessionModel.user_id == user_id).all()
+        for session in sessions:
+            db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session.id).delete()
+
+        # 删除关联的聊天会话
+        db.query(ChatSessionModel).filter(ChatSessionModel.user_id == user_id).delete()
+
+        # 删除关联的任务
+        db.query(TaskModel).filter(TaskModel.user_id == user_id).delete()
+
+        # 删除关联的样式模板（个人模板）
+        db.query(StyleTemplateModel).filter(StyleTemplateModel.user_id == user_id).delete()
+
+        # 最后删除用户
+        db.delete(user)
         db.commit()
         return True

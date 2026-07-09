@@ -151,8 +151,9 @@ async def get_task_stats(
 ) -> ResponseModel:
     """获取任务统计信息（Dashboard 用）"""
     try:
-        stats = task_manager.get_stats(user_id=current_user.id)
-        recent = task_manager.get_recent_tasks(limit=5, user_id=current_user.id)
+        user_id = None if current_user.role == "admin" else current_user.id
+        stats = task_manager.get_stats(user_id=user_id)
+        recent = task_manager.get_recent_tasks(limit=5, user_id=user_id)
         return ResponseModel(
             data={
                 "stats": stats,
@@ -168,9 +169,10 @@ async def get_task_stats(
 async def get_disk_usage(
     current_user: UserModel = Depends(get_current_user),
 ) -> ResponseModel:
-    """获取磁盘用量统计（Dashboard 用，按用户隔离）"""
+    """获取磁盘用量统计（Dashboard 用，管理员看全局）"""
     try:
-        usage = task_manager.get_disk_usage(user_id=current_user.id)
+        user_id = None if current_user.role == "admin" else current_user.id
+        usage = task_manager.get_disk_usage(user_id=user_id)
         return ResponseModel(data=usage)
     except Exception as e:
         logger.exception("获取磁盘用量失败")
@@ -198,10 +200,11 @@ async def list_tasks(
     status: TaskStatus | None = Query(default=None),
     current_user: UserModel = Depends(get_current_user),
 ) -> ResponseModel:
-    """获取任务列表"""
+    """获取任务列表（管理员看全部）"""
     try:
+        user_id = None if current_user.role == "admin" else current_user.id
         tasks, total = task_manager.list_tasks(
-            page=page, page_size=page_size, status=status.value if status else None, user_id=current_user.id
+            page=page, page_size=page_size, status=status.value if status else None, user_id=user_id
         )
         return ResponseModel(
             data=TaskListResponse(
@@ -222,7 +225,8 @@ async def get_task(
     current_user: UserModel = Depends(get_current_user),
 ) -> ResponseModel:
     """获取任务详情"""
-    task = task_manager.get_task(task_id, user_id=current_user.id)
+    user_id = None if current_user.role == "admin" else current_user.id
+    task = task_manager.get_task(task_id, user_id=user_id)
     if not task:
         return ResponseModel(code=404, message="任务不存在")
     return ResponseModel(data=task_manager.to_detail_dict(task))
@@ -234,7 +238,8 @@ async def get_task_status(
     current_user: UserModel = Depends(get_current_user),
 ) -> ResponseModel:
     """获取任务状态（轮询用）"""
-    task = task_manager.get_task(task_id, user_id=current_user.id)
+    user_id = None if current_user.role == "admin" else current_user.id
+    task = task_manager.get_task(task_id, user_id=user_id)
     if not task:
         return ResponseModel(code=404, message="任务不存在")
     return ResponseModel(data=task_manager.to_info_dict(task))
@@ -277,7 +282,8 @@ async def delete_task(
     current_user: UserModel = Depends(get_current_user),
 ) -> ResponseModel:
     """删除任务"""
-    task = task_manager.get_task(task_id, user_id=current_user.id)
+    user_id = None if current_user.role == "admin" else current_user.id
+    task = task_manager.get_task(task_id, user_id=user_id)
     if not task:
         return ResponseModel(code=404, message="任务不存在")
     if task_manager.delete_task(task_id):
@@ -291,7 +297,8 @@ async def download_result(
     current_user: UserModel = Depends(get_current_user),
 ) -> ResponseModel:
     """获取下载信息"""
-    task = task_manager.get_task(task_id, user_id=current_user.id)
+    user_id = None if current_user.role == "admin" else current_user.id
+    task = task_manager.get_task(task_id, user_id=user_id)
     if not task:
         return ResponseModel(code=404, message="任务不存在")
     if task.status != "completed":
@@ -311,7 +318,8 @@ async def download_file(
     current_user: UserModel = Depends(get_current_user),
 ):
     """下载结果文件"""
-    task = task_manager.get_task(task_id, user_id=current_user.id)
+    user_id = None if current_user.role == "admin" else current_user.id
+    task = task_manager.get_task(task_id, user_id=user_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     if task.status != "completed":
@@ -322,8 +330,9 @@ async def download_file(
     if task.result_path and Path(task.result_path).exists():
         result_path = Path(task.result_path)
     else:
-        # 在用户隔离 output 目录中查找
-        task_output_dir = get_user_output_dir(current_user.id, task_id)
+        # 在任务所属用户的 output 目录中查找
+        task_user_id = task.user_id if task.user_id else current_user.id
+        task_output_dir = get_user_output_dir(task_user_id, task_id)
         if task_output_dir.exists():
             # 查找 .docx 或 .md 文件
             for pattern in ("*.docx", "*.md"):

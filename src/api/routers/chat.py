@@ -119,9 +119,10 @@ async def list_sessions(
     page_size: int = 50,
     current_user: UserModel = Depends(get_current_user),
 ) -> ResponseModel:
-    """获取会话列表"""
+    """获取会话列表（管理员看全部）"""
+    user_id = None if current_user.role == "admin" else current_user.id
     with get_db_session() as db:
-        sessions, total = ChatSessionCRUD.list_sessions(db, page, page_size, user_id=current_user.id)
+        sessions, total = ChatSessionCRUD.list_sessions(db, page, page_size, user_id=user_id)
         items = []
         for s in sessions:
             msg_count = ChatMessageCRUD.count_messages(db, s.id)

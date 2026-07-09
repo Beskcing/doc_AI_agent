@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.api.routers import (
+    admin_router,
     auth_router,
     chat_router,
     config_router,
@@ -102,6 +103,7 @@ if _frontend_path.exists():
 
 # 注册 API 路由（auth 路由在最前，公开端点优先匹配）
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(upload_router)
 app.include_router(tasks_router)
 app.include_router(kb_router)

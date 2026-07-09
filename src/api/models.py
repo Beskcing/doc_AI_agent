@@ -401,3 +401,22 @@ class UpdateConfigRequest(BaseModel):
     pandoc_path: str | None = Field(default=None)
     output_dir: str | None = Field(default=None, description="输出目录")
     max_file_size_mb: int | None = Field(default=None, ge=1, le=500)
+
+
+# ────────── 管理员用户管理 ──────────
+class AdminCreateUserRequest(BaseModel):
+    """管理员创建用户请求"""
+
+    username: str = Field(
+        min_length=3, max_length=20, pattern=r"^[a-zA-Z0-9_]+$", description="用户名，3-20位字母数字下划线"
+    )
+    password: str = Field(min_length=8, max_length=64, description="密码，8-64位，需含大小写字母和数字")
+    role: str = Field(default="user", pattern=r"^(user|admin)$", description="角色: user 或 admin")
+
+
+class AdminUpdateUserRequest(BaseModel):
+    """管理员更新用户请求（所有字段可选）"""
+
+    password: str | None = Field(default=None, min_length=8, max_length=64, description="新密码，8-64位")
+    is_active: bool | None = Field(default=None, description="是否启用")
+    role: str | None = Field(default=None, pattern=r"^(user|admin)$", description="角色: user 或 admin")
