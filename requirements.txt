@@ -46,6 +46,11 @@ aiofiles>=24.1
 
 # 数据库
 sqlalchemy>=2.0
+psycopg2-binary>=2.9
+
+# 任务队列 (Celery)
+celery>=5.4
+redis>=5.0
 
 # MinerU (可选)
 # magic-pdf>=0.10

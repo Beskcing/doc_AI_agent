@@ -5,22 +5,34 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-# 数据库路径
-DB_DIR = Path("data")
-DB_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DB_DIR / "app.db"
+# 数据库 URL：优先使用环境变量 DATABASE_URL（PostgreSQL），否则使用 SQLite
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-# 同步引擎（简化处理，使用同步 Session）
-engine = create_engine(
-    f"sqlite:///{DB_PATH}",
-    connect_args={"check_same_thread": False},
-    echo=False,
-)
+if DATABASE_URL:
+    # PostgreSQL / 外部数据库
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=20,
+        max_overflow=10,
+        pool_pre_ping=True,
+        echo=False,
+    )
+else:
+    # SQLite 本地开发
+    DB_DIR = Path("data")
+    DB_DIR.mkdir(parents=True, exist_ok=True)
+    DB_PATH = DB_DIR / "app.db"
+    engine = create_engine(
+        f"sqlite:///{DB_PATH}",
+        connect_args={"check_same_thread": False},
+        echo=False,
+    )
 
 # 会话工厂
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

@@ -7,27 +7,28 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 
+from src.api.middleware.auth import get_current_user
 from src.api.models import BatchUploadResponse, ResponseModel, UploadResponse
-from src.utils.file_utils import ensure_dir
+from src.db.models import UserModel
+from src.utils.file_utils import get_user_upload_dir
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/upload", tags=["上传"])
 
-# 上传文件存储目录
-UPLOAD_DIR = Path("data/uploads")
-ensure_dir(UPLOAD_DIR)
-
 # 允许的文件扩展名
 ALLOWED_EXTENSIONS = {".pdf", ".md", ".txt"}
 
 
 @router.post("", response_model=ResponseModel)
-async def upload_file(file: UploadFile = File(...)) -> ResponseModel:
-    """上传文件"""
+async def upload_file(
+    file: UploadFile = File(...),
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
+    """上传文件（用户隔离：存入 data/uploads/{user_id}/）"""
     # 验证文件扩展名
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -35,7 +36,8 @@ async def upload_file(file: UploadFile = File(...)) -> ResponseModel:
 
     # 生成唯一上传 ID
     upload_id = str(uuid.uuid4())
-    file_path = UPLOAD_DIR / f"{upload_id}{ext}"
+    user_upload_dir = get_user_upload_dir(current_user.id)
+    file_path = user_upload_dir / f"{upload_id}{ext}"
 
     original_filename = file.filename or "unknown"
     try:
@@ -45,7 +47,7 @@ async def upload_file(file: UploadFile = File(...)) -> ResponseModel:
             f.write(contents)
 
         # Bug#1 修复：保存原始文件名元数据，供创建任务时恢复
-        meta_path = UPLOAD_DIR / f"{upload_id}.meta"
+        meta_path = user_upload_dir / f"{upload_id}.meta"
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump({"original_filename": original_filename}, f, ensure_ascii=False)
 
@@ -65,14 +67,18 @@ async def upload_file(file: UploadFile = File(...)) -> ResponseModel:
 
 
 @router.post("/batch", response_model=ResponseModel)
-async def batch_upload_files(files: list[UploadFile] = File(...)) -> ResponseModel:
-    """批量上传文件
+async def batch_upload_files(
+    files: list[UploadFile] = File(...),
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
+    """批量上传文件（用户隔离）
 
     接收多个文件，逐个保存并返回 upload_id 列表。
     """
     if not files:
         return ResponseModel(code=400, message="未选择文件")
 
+    user_upload_dir = get_user_upload_dir(current_user.id)
     results: list[UploadResponse] = []
     for file in files:
         ext = Path(file.filename or "").suffix.lower()
@@ -81,7 +87,7 @@ async def batch_upload_files(files: list[UploadFile] = File(...)) -> ResponseMod
             continue
 
         upload_id = str(uuid.uuid4())
-        file_path = UPLOAD_DIR / f"{upload_id}{ext}"
+        file_path = user_upload_dir / f"{upload_id}{ext}"
         original_filename = file.filename or "unknown"
 
         try:
@@ -90,7 +96,7 @@ async def batch_upload_files(files: list[UploadFile] = File(...)) -> ResponseMod
                 f.write(contents)
 
             # Bug#1 修复：保存原始文件名元数据
-            meta_path = UPLOAD_DIR / f"{upload_id}.meta"
+            meta_path = user_upload_dir / f"{upload_id}.meta"
             with open(meta_path, "w", encoding="utf-8") as f:
                 json.dump({"original_filename": original_filename}, f, ensure_ascii=False)
 

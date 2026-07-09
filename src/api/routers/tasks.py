@@ -23,20 +23,17 @@ from src.api.models import (
 )
 from src.api.services.task_manager import task_manager
 from src.db.models import UserModel
+from src.utils.file_utils import get_user_output_dir, get_user_upload_dir
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 上传文件存储目录
-UPLOAD_DIR = Path("data/uploads")
-OUTPUT_DIR = Path("data/output")
-
 router = APIRouter(prefix="/api/tasks", tags=["任务"])
 
 
-def _resolve_original_filename(upload_id: str, fallback: str) -> str:
+def _resolve_original_filename(upload_id: str, user_upload_dir: Path, fallback: str) -> str:
     """Bug#1 修复：从上传元数据文件中恢复原始文件名"""
-    meta_path = UPLOAD_DIR / f"{upload_id}.meta"
+    meta_path = user_upload_dir / f"{upload_id}.meta"
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -53,12 +50,13 @@ async def create_task(
 ) -> ResponseModel:
     """创建排版任务"""
     try:
-        # 查找上传的文件
+        # 查找上传的文件（用户隔离目录）
         upload_id = request.upload_id
+        user_upload_dir = get_user_upload_dir(current_user.id)
         file_path = None
         filename = upload_id
         for ext in (".pdf", ".md", ".txt"):
-            candidate = UPLOAD_DIR / f"{upload_id}{ext}"
+            candidate = user_upload_dir / f"{upload_id}{ext}"
             if candidate.exists():
                 file_path = str(candidate)
                 filename = candidate.name
@@ -69,7 +67,7 @@ async def create_task(
             return ResponseModel(code=400, message=f"上传文件不存在: {upload_id}（请先上传文件再创建任务）")
 
         # Bug#1 修复：恢复原始文件名
-        filename = _resolve_original_filename(upload_id, filename)
+        filename = _resolve_original_filename(upload_id, user_upload_dir, filename)
 
         task = task_manager.create_task(
             upload_id=upload_id,
@@ -104,12 +102,13 @@ async def batch_create_tasks(
     try:
         created_tasks = []
         skipped_count = 0
+        user_upload_dir = get_user_upload_dir(current_user.id)
         for item in request.items:
-            # 查找上传的文件
+            # 查找上传的文件（用户隔离目录）
             file_path = None
             filename = item.filename or item.upload_id
             for ext in (".pdf", ".md", ".txt"):
-                candidate = UPLOAD_DIR / f"{item.upload_id}{ext}"
+                candidate = user_upload_dir / f"{item.upload_id}{ext}"
                 if candidate.exists():
                     file_path = str(candidate)
                     filename = candidate.name
@@ -122,7 +121,7 @@ async def batch_create_tasks(
                 continue
 
             # Bug#1 修复：恢复原始文件名
-            filename = _resolve_original_filename(item.upload_id, filename)
+            filename = _resolve_original_filename(item.upload_id, user_upload_dir, filename)
 
             task = task_manager.create_task(
                 upload_id=item.upload_id,
@@ -166,10 +165,12 @@ async def get_task_stats(
 
 
 @router.get("/disk-usage", response_model=ResponseModel)
-async def get_disk_usage() -> ResponseModel:
-    """获取磁盘用量统计（Dashboard 用）"""
+async def get_disk_usage(
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
+    """获取磁盘用量统计（Dashboard 用，按用户隔离）"""
     try:
-        usage = task_manager.get_disk_usage()
+        usage = task_manager.get_disk_usage(user_id=current_user.id)
         return ResponseModel(data=usage)
     except Exception as e:
         logger.exception("获取磁盘用量失败")
@@ -321,8 +322,8 @@ async def download_file(
     if task.result_path and Path(task.result_path).exists():
         result_path = Path(task.result_path)
     else:
-        # 在 output 目录中查找
-        task_output_dir = OUTPUT_DIR / task_id
+        # 在用户隔离 output 目录中查找
+        task_output_dir = get_user_output_dir(current_user.id, task_id)
         if task_output_dir.exists():
             # 查找 .docx 或 .md 文件
             for pattern in ("*.docx", "*.md"):
@@ -386,8 +387,8 @@ async def preview_result(task_id: str) -> ResponseModel:
     # 降级逻辑：如果数据库中的预览内容过短（旧任务被截断），
     # 尝试从输出目录的 cleaned.md 文件读取完整内容
     if not markdown_preview or len(markdown_preview) <= 2000:
-        cleaned_md_path = Path("data/output") / task_id / "cleaned.md"
-        if cleaned_md_path.exists():
+        cleaned_md_path = get_user_output_dir(task.user_id, task_id) / "cleaned.md" if task else None
+        if cleaned_md_path and cleaned_md_path.exists():
             markdown_preview = cleaned_md_path.read_text(encoding="utf-8")
             # 同步更新数据库（BUG 修复：移除不必要的 update_status 空操作调用）
             from src.db.session import get_db_session
@@ -529,7 +530,11 @@ async def apply_template_to_task(task_id: str, request: ApplyTemplateRequest) ->
 
 
 @router.post("/{task_id}/upload-corrected-docx", response_model=ResponseModel)
-async def upload_corrected_docx(task_id: str, file: UploadFile = File(...)) -> ResponseModel:
+async def upload_corrected_docx(
+    task_id: str,
+    file: UploadFile = File(...),
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
     """上传用户手动修正后的 DOCX 文件（功能1：用户直接修正DOC）
 
     流程：
@@ -543,11 +548,12 @@ async def upload_corrected_docx(task_id: str, file: UploadFile = File(...)) -> R
         return ResponseModel(code=400, message=f"仅支持 .docx 格式，收到: {ext}")
 
     try:
-        # 保存上传的文件
+        # 保存上传的文件（用户隔离）
         import uuid as uuid_mod
 
         upload_id = str(uuid_mod.uuid4())
-        corrected_path = UPLOAD_DIR / f"{upload_id}_corrected.docx"
+        user_upload_dir = get_user_upload_dir(current_user.id)
+        corrected_path = user_upload_dir / f"{upload_id}_corrected.docx"
         contents = await file.read()
         with open(corrected_path, "wb") as f:
             f.write(contents)
@@ -652,7 +658,7 @@ async def get_task_content(task_id: str) -> ResponseModel:
         markdown_content = task.cleaned_markdown_preview
         if not markdown_content:
             # 尝试从文件读取
-            result_dir = Path("data/output") / task_id
+            result_dir = get_user_output_dir(task.user_id, task_id) if task else Path("data/output") / task_id
             md_path = result_dir / "cleaned.md"
             if md_path.exists():
                 markdown_content = md_path.read_text(encoding="utf-8")

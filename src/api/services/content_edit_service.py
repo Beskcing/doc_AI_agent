@@ -14,6 +14,7 @@ from pathlib import Path
 
 from src.api.services.service_deps import ServiceDeps
 from src.db.session import get_db_session
+from src.utils.file_utils import get_user_output_dir
 from src.utils.json_validator import safe_parse_llm_json
 from src.utils.logger import get_logger
 
@@ -46,6 +47,13 @@ class ContentEditService:
         self._apply_style = apply_style_fn
         self._convert_to_docx = convert_to_docx_fn
 
+    def _get_result_dir(self, task_id: str) -> Path:
+        """获取用户隔离的任务输出目录"""
+        task = self._get_task(task_id)
+        if task and task.user_id:
+            return get_user_output_dir(task.user_id, task_id)
+        return Path("data/output") / task_id
+
     def update_content(
         self, task_id: str, content: str, content_type: str = "markdown", regenerate_docx: bool = True
     ) -> dict:
@@ -56,7 +64,7 @@ class ContentEditService:
         if task.status != "completed":
             raise ValueError("任务尚未完成，无法编辑内容")
 
-        result_dir = Path("data/output") / task_id
+        result_dir = self._get_result_dir(task_id)
         result_dir.mkdir(parents=True, exist_ok=True)
 
         markdown_content = content
@@ -131,7 +139,7 @@ class ContentEditService:
 
         markdown_content = task.cleaned_markdown_preview
         if not markdown_content:
-            result_dir = Path("data/output") / task_id
+            result_dir = self._get_result_dir(task_id)
             md_path = result_dir / "cleaned.md"
             if md_path.exists():
                 markdown_content = md_path.read_text(encoding="utf-8")
@@ -160,7 +168,7 @@ class ContentEditService:
 
         markdown_content = task.cleaned_markdown_preview
         if not markdown_content:
-            result_dir = Path("data/output") / task_id
+            result_dir = self._get_result_dir(task_id)
             md_path = result_dir / "cleaned.md"
             if md_path.exists():
                 markdown_content = md_path.read_text(encoding="utf-8")
@@ -174,7 +182,7 @@ class ContentEditService:
         else:
             updated_markdown, reply = self._llm_edit_content_full_mode(markdown_content, message)
 
-        result_dir = Path("data/output") / task_id
+        result_dir = self._get_result_dir(task_id)
         result_dir.mkdir(parents=True, exist_ok=True)
         cleaned_md_path = result_dir / "cleaned.md"
         cleaned_md_path.write_text(updated_markdown, encoding="utf-8")
@@ -228,7 +236,7 @@ class ContentEditService:
 
     def _html_to_docx(self, task_id: str, html: str) -> str:
         """HTML → DOCX 转换（使用 htmldocx，无需 Pandoc）"""
-        result_dir = Path("data/output") / task_id
+        result_dir = self._get_result_dir(task_id)
         result_dir.mkdir(parents=True, exist_ok=True)
         docx_path = result_dir / "formatted.docx"
 
@@ -255,7 +263,7 @@ class ContentEditService:
 
         import pypandoc
 
-        result_dir = Path("data/output") / task_id
+        result_dir = self._get_result_dir(task_id)
         result_dir.mkdir(parents=True, exist_ok=True)
         docx_path = result_dir / "formatted.docx"
 

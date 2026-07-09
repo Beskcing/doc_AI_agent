@@ -18,6 +18,7 @@ from src.db.database import SessionLocal
 from src.db.models import TaskModel
 from src.db.session import get_db_session
 from src.llm_client import LLMClient
+from src.utils.file_utils import get_user_output_dir
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -201,12 +202,20 @@ class TaskManager:
             if task.status == "processing":
                 return False
 
-            output_dir = Path("data/output") / task_id
+            output_dir = get_user_output_dir(task.user_id, task_id)
             if output_dir.exists():
                 import shutil
 
                 shutil.rmtree(output_dir, ignore_errors=True)
                 logger.info("任务 %s: 已清理输出目录 %s", task_id, output_dir)
+
+            # 兼容旧格式（无 user_id 隔离的目录）
+            legacy_output_dir = Path("data/output") / task_id
+            if legacy_output_dir.exists():
+                import shutil
+
+                shutil.rmtree(legacy_output_dir, ignore_errors=True)
+                logger.info("任务 %s: 已清理旧格式输出目录 %s", task_id, legacy_output_dir)
 
             TaskCRUD.delete(db, task_id)
             logger.info("任务 %s: 已删除", task_id)
@@ -217,14 +226,21 @@ class TaskManager:
         with get_db_session() as db:
             return TaskCRUD.count_by_status(db, user_id=user_id)
 
-    def get_disk_usage(self) -> dict:
+    def get_disk_usage(self, user_id: str | None = None) -> dict:
         """获取磁盘用量统计
+
+        Args:
+            user_id: 可选，按用户过滤统计
 
         Returns:
             { output_mb, uploads_mb, total_mb, output_task_count, orphaned_count }
         """
-        output_dir = Path("data/output")
-        uploads_dir = Path("data/uploads")
+        if user_id:
+            output_dir = get_user_output_dir(user_id)
+            uploads_dir = Path("data/uploads") / user_id
+        else:
+            output_dir = Path("data/output")
+            uploads_dir = Path("data/uploads")
 
         def _dir_size(path: Path) -> float:
             if not path.exists():
@@ -245,7 +261,10 @@ class TaskManager:
         if output_dir.exists():
             # 获取所有 DB 中存在的 task_id 集合
             with get_db_session() as db:
-                db_task_ids = {t[0] for t in db.query(TaskModel.id).all()}
+                query = db.query(TaskModel.id)
+                if user_id:
+                    query = query.filter(TaskModel.user_id == user_id)
+                db_task_ids = {t[0] for t in query.all()}
             for d in output_dir.iterdir():
                 if d.is_dir():
                     task_count += 1
@@ -261,9 +280,9 @@ class TaskManager:
         }
 
     def cleanup_old_tasks(self, older_than_days: int = 30, dry_run: bool = False) -> dict:
-        """清理超过 N 天的任务输出目录（文件系统优先扫描，覆盖孤儿目录）
+        """清理超过 N 天的任务输出目录（支持用户隔离目录）
 
-        扫描策略：直接遍历 data/output/ 目录，而非依赖 DB 查询，
+        扫描策略：遍历 data/output/ 目录，包括用户隔离子目录。
         确保 DB 记录已被删除的孤儿目录也能被清理。
 
         Args:
@@ -277,13 +296,13 @@ class TaskManager:
         from datetime import datetime, timedelta
 
         cutoff = datetime.now() - timedelta(days=older_than_days)
-        output_dir = Path("data/output")
+        output_root = Path("data/output")
         deleted_count = 0
         freed_bytes = 0
         scanned_count = 0
         orphaned_count = 0
 
-        if not output_dir.exists():
+        if not output_root.exists():
             return {"deleted_count": 0, "freed_mb": 0.0, "scanned_count": 0, "orphaned_count": 0}
 
         # 一次性加载 DB 中的任务信息（ID → (status, created_at)）
@@ -292,11 +311,21 @@ class TaskManager:
             rows = db.query(TaskModel.id, TaskModel.status, TaskModel.created_at).all()
             db_tasks = {r[0]: (r[1], r[2]) for r in rows}
 
-        # 遍历文件系统中的所有输出目录
-        for task_dir in output_dir.iterdir():
-            if not task_dir.is_dir():
+        # 收集所有需要扫描的任务目录（包括用户隔离子目录和旧格式）
+        task_dirs: list[tuple[Path, str]] = []  # (path, task_id)
+        for entry in output_root.iterdir():
+            if not entry.is_dir():
                 continue
-            task_id = task_dir.name
+            # 检查是否是用户 ID 子目录（UUID 格式，36 字符）
+            if len(entry.name) == 36 and entry.name.count("-") == 4:
+                for task_entry in entry.iterdir():
+                    if task_entry.is_dir():
+                        task_dirs.append((task_entry, task_entry.name))
+            else:
+                # 旧格式：task_id 直接在 output/ 下
+                task_dirs.append((entry, entry.name))
+
+        for task_dir, task_id in task_dirs:
             scanned_count += 1
 
             # 判断是否需要清理
@@ -304,13 +333,11 @@ class TaskManager:
             is_orphan = task_id not in db_tasks
 
             if is_orphan:
-                # 孤儿目录：按目录修改时间判断
                 orphaned_count += 1
                 dir_mtime = datetime.fromtimestamp(task_dir.stat().st_mtime)
                 if dir_mtime < cutoff:
                     should_clean = True
             else:
-                # 有 DB 记录：按任务状态 + 创建时间判断
                 status, created_at = db_tasks[task_id]
                 if status in ("completed", "failed", "cancelled") and created_at < cutoff:
                     should_clean = True
@@ -361,8 +388,34 @@ class TaskManager:
             return TaskCRUD.get_recent(db, limit=limit, user_id=user_id)
 
     def submit_task(self, task_id: str) -> None:
-        """提交任务到线程池异步处理"""
+        """提交任务到异步处理队列
+
+        优先使用 Celery（需要 Redis），不可用时降级为 ThreadPoolExecutor。
+        """
+        self._submit_via_celery_or_thread(task_id)
+
+    def _submit_via_celery_or_thread(self, task_id: str) -> None:
+        """提交任务：Celery 优先，降级线程池"""
+        try:
+            from src.tasks.pipeline_task import process_pipeline_task
+
+            # 检查 Celery broker 是否可用（简单探测）
+            process_pipeline_task.delay(task_id)
+            logger.info("任务 %s: 已提交到 Celery 队列", task_id)
+            return
+        except Exception as e:
+            logger.warning("Celery 不可用 (%s)，降级为线程池处理任务 %s", e, task_id)
+
+        # 降级：使用线程池
         self._executor.submit(self._process_task, task_id)
+        logger.info("任务 %s: 已提交到线程池", task_id)
+
+    def process_task(self, task_id: str) -> None:
+        """处理任务（公开接口，供 Celery Worker 调用）
+
+        执行完整的排版管线，与 _process_task 逻辑一致。
+        """
+        self._process_task(task_id)
 
     # ──────── 管线处理（委托 PipelineService） ────────
 

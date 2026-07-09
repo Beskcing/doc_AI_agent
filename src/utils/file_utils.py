@@ -121,3 +121,36 @@ def get_file_size_mb(file_path: str | Path) -> float:
         文件大小（MB）
     """
     return os.path.getsize(file_path) / (1024 * 1024)
+
+
+# ──────── 多用户文件系统隔离 ────────
+
+
+def get_user_upload_dir(user_id: str) -> Path:
+    """获取用户专属上传目录
+
+    Args:
+        user_id: 用户 ID
+
+    Returns:
+        data/uploads/{user_id}/ 目录 Path 对象（自动创建）
+    """
+    p = Path("data/uploads") / user_id
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_user_output_dir(user_id: str, task_id: str = "") -> Path:
+    """获取用户专属输出目录
+
+    Args:
+        user_id: 用户 ID
+        task_id: 可选的任务 ID，指定时返回 data/output/{user_id}/{task_id}/
+
+    Returns:
+        用户专属输出目录 Path 对象
+    """
+    p = Path("data/output") / user_id
+    if task_id:
+        p = p / task_id
+    return p

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from src.api.services.service_deps import ServiceDeps
 from src.db.session import get_db_session
 from src.models.document_schema import IntentAnalysis
+from src.utils.file_utils import get_user_output_dir
 from src.utils.json_validator import safe_parse_llm_json
 from src.utils.logger import get_logger
 
@@ -46,6 +47,20 @@ class PipelineService:
         """
         self.deps = deps
         self._update_status = update_status
+
+    def _get_result_dir(self, task_id: str) -> Path:
+        """获取用户隔离的任务输出目录
+
+        从数据库查找任务的 user_id，构造 data/output/{user_id}/{task_id}/ 路径。
+        """
+        from src.db.crud import TaskCRUD
+
+        with get_db_session() as db:
+            task = TaskCRUD.get(db, task_id)
+            if task and task.user_id:
+                return get_user_output_dir(task.user_id, task_id)
+        # 降级：无 user_id 时使用旧格式
+        return Path("data/output") / task_id
 
     def process_task(
         self,
@@ -123,7 +138,7 @@ class PipelineService:
         self._update_status(task_id, "processing", progress=20, current_step="review_content")
         cleaned_markdown = self._clean_markdown(task_id, markdown_content, extract_dir, intent=intent)
 
-        result_dir = Path("data/output") / task_id
+        result_dir = self._get_result_dir(task_id)
         result_dir.mkdir(parents=True, exist_ok=True)
         cleaned_md_path = result_dir / "cleaned.md"
         cleaned_md_path.write_text(cleaned_markdown, encoding="utf-8")
@@ -239,7 +254,7 @@ class PipelineService:
     def _parse_input(self, task_id: str, file_path: str) -> tuple[str, str, str | None]:
         """使用 MinerU 解析 PDF"""
         mineru_cfg = self.deps.config.mineru
-        output_dir = Path("data/output") / task_id
+        output_dir = self._get_result_dir(task_id)
 
         def on_progress(stage: str, info: dict) -> None:
             stage_map = {
@@ -475,7 +490,7 @@ class PipelineService:
 
         import pypandoc
 
-        result_dir = Path("data/output") / task_id
+        result_dir = self._get_result_dir(task_id)
         result_dir.mkdir(parents=True, exist_ok=True)
         docx_path = result_dir / "formatted.docx"
         extract_path = Path(extract_dir)
@@ -520,7 +535,7 @@ class PipelineService:
         from src.models.style_config import StyleConfig
         from src.tools.docx_styler import DocxStyler
 
-        result_dir = Path("data/output") / task_id
+        result_dir = self._get_result_dir(task_id)
         styled_path = result_dir / "formatted_styled.docx"
 
         try:
@@ -601,7 +616,7 @@ class PipelineService:
         Returns:
             输出 DOCX 路径
         """
-        result_dir = Path("data/output") / task_id
+        result_dir = self._get_result_dir(task_id)
         styled_path = result_dir / "formatted_styled.docx"
 
         self._update_status(task_id, "processing", progress=50, current_step="formatter")
@@ -666,7 +681,7 @@ class PipelineService:
         if not base_docx or not Path(base_docx).exists():
             base_docx = task.result_path
             if not base_docx or not Path(base_docx).exists():
-                result_dir = Path("data/output") / task_id
+                result_dir = self._get_result_dir(task_id)
                 if result_dir.exists():
                     for pattern in ("full.docx", "formatted.docx", "formatted_styled.docx"):
                         candidate = result_dir / pattern
@@ -830,7 +845,7 @@ class PipelineService:
         删除 *_content_list.json, *_model.json, full.md。
         保留 cleaned.md（预览降级用）、full.docx（MinerU 原始预览用）、formatted_styled.docx（最终产物）。
         """
-        output_dir = Path("data/output") / task_id
+        output_dir = self._get_result_dir(task_id)
         if not output_dir.exists():
             return
 

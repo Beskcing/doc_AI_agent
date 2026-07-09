@@ -1,4 +1,39 @@
 services:
+  # ──────── 数据库 ────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: doc-ai-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-docai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docai_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-docai}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-docai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ──────── 消息队列 ────────
+  redis:
+    image: redis:7-alpine
+    container_name: doc-ai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ──────── 主应用 ────────
   doc-ai-agent:
     build:
       context: .
@@ -10,15 +45,21 @@ services:
       - MINERU_API_TOKEN=${MINERU_API_TOKEN}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
       - ZHIPUAI_API_KEY=${ZHIPUAI_API_KEY}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-docai}:${POSTGRES_PASSWORD:-docai_secret}@postgres:5432/${POSTGRES_DB:-docai}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
     env_file:
       - .env
     volumes:
-      # 持久化数据目录
       - data_volume:/app/data
       - knowledge_data_volume:/app/knowledge_data
       - logs_volume:/app/logs
-      # 挂载 .env 以支持运行时修改
       - ./.env:/app/.env:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
@@ -27,7 +68,38 @@ services:
       retries: 3
       start_period: 40s
 
+  # ──────── Celery Worker ────────
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: doc-ai-celery-worker
+    command: python scripts/run_worker.py
+    environment:
+      - MINERU_API_TOKEN=${MINERU_API_TOKEN}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - ZHIPUAI_API_KEY=${ZHIPUAI_API_KEY}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-docai}:${POSTGRES_PASSWORD:-docai_secret}@postgres:5432/${POSTGRES_DB:-docai}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    env_file:
+      - .env
+    volumes:
+      - data_volume:/app/data
+      - knowledge_data_volume:/app/knowledge_data
+      - logs_volume:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      replicas: 4  # 默认 4 Workers，可调至 16+
+
 volumes:
+  pgdata:
+  redisdata:
   data_volume:
   knowledge_data_volume:
   logs_volume:
