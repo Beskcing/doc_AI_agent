@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -16,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.api.routers import (
+    auth_router,
     chat_router,
     config_router,
     formatters_router,
@@ -53,16 +55,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS 配置
+# CORS 配置（生产环境限制为前端域名）
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应限制为前端域名
+    allow_origins=[FRONTEND_ORIGIN],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
-# 限流中间件（IP 级，100 请求/分钟）
+# 限流中间件（用户级 by Authorization header，回退 IP 级）
 _rate_limit_store: dict[str, list[float]] = defaultdict(list)
 RATE_LIMIT = 100  # requests
 RATE_WINDOW = 60  # seconds
@@ -70,15 +73,19 @@ RATE_WINDOW = 60  # seconds
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    """IP 级基本限流，防止恶意请求"""
-    client_ip = request.client.host if request.client else "unknown"
+    """用户级限流（基于 JWT），回退 IP 级，防止恶意请求"""
+    # 优先从 Authorization header 提取用户标识
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        client_key = "user:" + auth_header[:80]  # 截断 token 前缀作为 key
+    else:
+        client_key = "ip:" + (request.client.host if request.client else "unknown")
     now = time.time()
-    window = _rate_limit_store[client_ip]
-    # 清理过期记录
-    _rate_limit_store[client_ip] = [t for t in window if now - t < RATE_WINDOW]
-    if len(_rate_limit_store[client_ip]) >= RATE_LIMIT:
+    window = _rate_limit_store[client_key]
+    _rate_limit_store[client_key] = [t for t in window if now - t < RATE_WINDOW]
+    if len(_rate_limit_store[client_key]) >= RATE_LIMIT:
         return JSONResponse(status_code=429, content={"code": 429, "message": "请求过于频繁"})
-    _rate_limit_store[client_ip].append(now)
+    _rate_limit_store[client_key].append(now)
     return await call_next(request)
 
 
@@ -93,7 +100,8 @@ if _frontend_path.exists():
     logger.info("前端静态文件已挂载: %s", _frontend_path)
 
 
-# 注册 API 路由
+# 注册 API 路由（auth 路由在最前，公开端点优先匹配）
+app.include_router(auth_router)
 app.include_router(upload_router)
 app.include_router(tasks_router)
 app.include_router(kb_router)

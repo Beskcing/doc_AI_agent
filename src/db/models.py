@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.database import Base
@@ -17,6 +17,7 @@ class TaskModel(Base):
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     upload_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     standard: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -59,11 +60,13 @@ class StyleTemplateModel(Base):
     """样式模板表
 
     保存用户上传/自定义的排版样式模板，可在创建任务时选择使用。
+    user_id 为空表示为系统预置模板（所有人可见），非空为个人模板。
     """
 
     __tablename__ = "style_templates"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     standard: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
@@ -107,6 +110,7 @@ class ChatSessionModel(Base):
     __tablename__ = "chat_sessions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), default="新对话")
     style_config: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -125,6 +129,7 @@ class ChatMessageModel(Base):
     __tablename__ = "chat_messages"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     session_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # user / assistant
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -145,6 +150,7 @@ class StyleAdjustmentHistoryModel(Base):
     __tablename__ = "style_adjustment_history"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     task_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     source: Mapped[str] = mapped_column(
         String(50), nullable=False
@@ -157,3 +163,23 @@ class StyleAdjustmentHistoryModel(Base):
 
     def __repr__(self) -> str:
         return f"<StyleAdjustmentHistory(task={self.task_id}, source={self.source})>"
+
+
+class UserModel(Base):
+    """用户表
+
+    支持用户名+密码注册登录，role 区分普通用户和管理员。
+    管理员可访问知识库管理、系统配置等全局功能。
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), default="user")  # user / admin
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, username={self.username}, role={self.role})>"

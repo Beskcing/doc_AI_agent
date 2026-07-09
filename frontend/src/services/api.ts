@@ -10,17 +10,106 @@ const api = axios.create({
   },
 })
 
-// 响应拦截器
+// ────────── Token 管理 ──────────
+const getAccessToken = (): string | null => localStorage.getItem('access_token')
+const getRefreshToken = (): string | null => localStorage.getItem('refresh_token')
+const getUserInfo = () => {
+  try {
+    const raw = localStorage.getItem('user_info')
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+export { getAccessToken, getRefreshToken, getUserInfo }
+
+// 请求拦截器：自动附加 Authorization header
+api.interceptors.request.use(
+  (config) => {
+    const token = getAccessToken()
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => Promise.reject(error)
+)
+
+// ────────── Token 刷新逻辑 ──────────
+let isRefreshing = false
+let refreshSubscribers: Array<(token: string) => void> = []
+
+const onRefreshed = (token: string) => {
+  refreshSubscribers.forEach((cb) => cb(token))
+  refreshSubscribers = []
+}
+
+const addRefreshSubscriber = (cb: (token: string) => void) => {
+  refreshSubscribers.push(cb)
+}
+
+const tryRefreshToken = async (): Promise<boolean> => {
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) return false
+  try {
+    const res = await axios.post(`${API_BASE}/api/auth/refresh`, {
+      refresh_token: refreshToken,
+    })
+    const { access_token, refresh_token, user } = res.data
+    localStorage.setItem('access_token', access_token)
+    localStorage.setItem('refresh_token', refresh_token)
+    if (user) localStorage.setItem('user_info', JSON.stringify(user))
+    return true
+  } catch {
+    return false
+  }
+}
+
+// 响应拦截器：401 时自动刷新 token
 api.interceptors.response.use(
   (response) => {
     const { data } = response
-    if (data.code !== 0) {
+    // 跳过认证接口的 code 校验（注册/登录的 code 可能是 HTTP 状态码）
+    if (response.config.url?.startsWith('/api/auth/')) {
+      return response
+    }
+    if (data.code !== undefined && data.code !== 0) {
       return Promise.reject(new Error(data.message || '请求失败'))
     }
     return response
   },
-  (error) => {
-    const message = error.response?.data?.message || error.message || '网络错误'
+  async (error) => {
+    const originalRequest = error.config
+    // 401 未认证，尝试刷新 token
+    if (error.response?.status === 401 && !originalRequest._retry && originalRequest.url !== '/api/auth/refresh') {
+      if (isRefreshing) {
+        // 已有刷新进行中，等待它完成
+        return new Promise((resolve) => {
+          addRefreshSubscriber((token: string) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`
+            resolve(api(originalRequest))
+          })
+        })
+      }
+      originalRequest._retry = true
+      isRefreshing = true
+      const success = await tryRefreshToken()
+      isRefreshing = false
+      if (success) {
+        const newToken = getAccessToken()
+        if (newToken) {
+          onRefreshed(newToken)
+          originalRequest.headers.Authorization = `Bearer ${newToken}`
+          return api(originalRequest)
+        }
+      }
+      // 刷新失败，清除 token 跳转登录
+      localStorage.clear()
+      window.location.href = '/login'
+      return Promise.reject(new Error('登录已过期，请重新登录'))
+    }
+    const message = error.response?.data?.message || error.response?.data?.detail || error.message || '网络错误'
     return Promise.reject(new Error(message))
   }
 )
@@ -237,3 +326,13 @@ export const chatEditContent = (data: {
   task_id: string
   session_id?: string
 }) => api.post('/api/chat/content', data, { timeout: 120000 })
+
+// ────────── 用户认证 ──────────
+export const register = (data: { username: string; password: string }) =>
+  api.post('/api/auth/register', data)
+
+export const login = (data: { username: string; password: string }) =>
+  api.post('/api/auth/login', data)
+
+export const getMe = () =>
+  api.get('/api/auth/me')

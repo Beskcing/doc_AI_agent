@@ -347,6 +347,49 @@ class SystemConfig(BaseModel):
     supported_formats: list[str] = Field(default=["pdf", "md", "txt"], description="支持的文件格式")
 
 
+# ────────── 用户认证 ──────────
+class RegisterRequest(BaseModel):
+    """用户注册请求"""
+
+    username: str = Field(
+        min_length=3, max_length=20, pattern=r"^[a-zA-Z0-9_]+$", description="用户名，3-20位字母数字下划线"
+    )
+    password: str = Field(min_length=8, max_length=64, description="密码，8-64位，需含大小写字母和数字")
+
+
+class LoginRequest(BaseModel):
+    """用户登录请求"""
+
+    username: str = Field(description="用户名")
+    password: str = Field(description="密码")
+
+
+class TokenResponse(BaseModel):
+    """Token 响应"""
+
+    access_token: str = Field(description="Access Token")
+    refresh_token: str = Field(description="Refresh Token")
+    token_type: str = Field(default="bearer", description="Token 类型")
+    expires_in: int = Field(default=1800, description="过期时间（秒）")
+    user: dict = Field(default_factory=dict, description="用户信息摘要")
+
+
+class RefreshRequest(BaseModel):
+    """刷新 Token 请求"""
+
+    refresh_token: str = Field(description="Refresh Token")
+
+
+class UserInfo(BaseModel):
+    """用户信息"""
+
+    id: str = Field(description="用户 ID")
+    username: str = Field(description="用户名")
+    role: str = Field(description="角色: user/admin")
+    is_active: bool = Field(description="是否启用")
+    created_at: datetime = Field(description="注册时间")
+
+
 class UpdateConfigRequest(BaseModel):
     """更新配置请求"""
 

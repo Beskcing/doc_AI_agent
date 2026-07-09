@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom'
+import AuthGuard from './components/AuthGuard'
 import AppLayout from './components/AppLayout'
 import Dashboard from './pages/Dashboard'
 import UploadPage from './pages/UploadPage'
@@ -8,11 +9,22 @@ import ChatPage from './pages/ChatPage'
 import KbPage from './pages/KbPage'
 import ConfigPage from './pages/ConfigPage'
 import TemplatesPage from './pages/TemplatesPage'
+import LoginPage from './pages/LoginPage'
 
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<AppLayout />}>
+      {/* 公开路由：登录/注册 */}
+      <Route path="/login" element={<LoginPage />} />
+      {/* 受保护路由 */}
+      <Route
+        path="/"
+        element={
+          <AuthGuard>
+            <AppLayout />
+          </AuthGuard>
+        }
+      >
         <Route index element={<Dashboard />} />
         <Route path="upload" element={<UploadPage />} />
         <Route path="tasks" element={<TasksPage />} />

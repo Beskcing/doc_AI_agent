@@ -103,6 +103,7 @@ class TaskManager:
         self,
         upload_id: str,
         filename: str,
+        user_id: str,
         standard: str,
         use_rag: bool = True,
         llm_model: str = "qwen-plus",
@@ -118,6 +119,7 @@ class TaskManager:
             task = TaskCRUD.create(
                 db,
                 upload_id=upload_id,
+                user_id=user_id,
                 filename=filename,
                 standard=standard,
                 status="pending",
@@ -129,15 +131,17 @@ class TaskManager:
             logger.info("创建任务: %s (upload_id=%s, file_size=%.2fMB)", task.id, upload_id, file_size_mb or 0)
             return task
 
-    def get_task(self, task_id: str) -> TaskModel | None:
+    def get_task(self, task_id: str, user_id: str | None = None) -> TaskModel | None:
         """获取任务"""
         with get_db_session() as db:
-            return TaskCRUD.get(db, task_id)
+            return TaskCRUD.get(db, task_id, user_id=user_id)
 
-    def list_tasks(self, page: int = 1, page_size: int = 10, status: str | None = None) -> tuple[list[TaskModel], int]:
+    def list_tasks(
+        self, page: int = 1, page_size: int = 10, status: str | None = None, user_id: str | None = None
+    ) -> tuple[list[TaskModel], int]:
         """获取任务列表"""
         with get_db_session() as db:
-            return TaskCRUD.list_tasks(db, page=page, page_size=page_size, status=status)
+            return TaskCRUD.list_tasks(db, page=page, page_size=page_size, status=status, user_id=user_id)
 
     def update_status(
         self,
@@ -208,10 +212,10 @@ class TaskManager:
             logger.info("任务 %s: 已删除", task_id)
             return True
 
-    def get_stats(self) -> dict[str, int]:
+    def get_stats(self, user_id: str | None = None) -> dict[str, int]:
         """获取任务统计"""
         with get_db_session() as db:
-            return TaskCRUD.count_by_status(db)
+            return TaskCRUD.count_by_status(db, user_id=user_id)
 
     def get_disk_usage(self) -> dict:
         """获取磁盘用量统计
@@ -351,10 +355,10 @@ class TaskManager:
             "orphaned_count": orphaned_count,
         }
 
-    def get_recent_tasks(self, limit: int = 5) -> list[TaskModel]:
+    def get_recent_tasks(self, limit: int = 5, user_id: str | None = None) -> list[TaskModel]:
         """获取最近任务"""
         with get_db_session() as db:
-            return TaskCRUD.get_recent(db, limit=limit)
+            return TaskCRUD.get_recent(db, limit=limit, user_id=user_id)
 
     def submit_task(self, task_id: str) -> None:
         """提交任务到线程池异步处理"""

@@ -8,9 +8,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from src.api.middleware.auth import get_current_user
 from src.api.models import (
     ChatMessageInfo,
     ChatRequest,
@@ -23,6 +24,7 @@ from src.api.models import (
 )
 from src.config import AppConfig
 from src.db.crud import ChatMessageCRUD, ChatSessionCRUD
+from src.db.models import UserModel
 from src.db.session import get_db_session
 from src.llm_client import LLMClient
 from src.utils.json_validator import safe_parse_llm_json
@@ -112,10 +114,14 @@ def _build_context_messages(
 
 
 @router.get("/sessions", response_model=ResponseModel)
-async def list_sessions(page: int = 1, page_size: int = 50) -> ResponseModel:
+async def list_sessions(
+    page: int = 1,
+    page_size: int = 50,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
     """获取会话列表"""
     with get_db_session() as db:
-        sessions, total = ChatSessionCRUD.list_sessions(db, page, page_size)
+        sessions, total = ChatSessionCRUD.list_sessions(db, page, page_size, user_id=current_user.id)
         items = []
         for s in sessions:
             msg_count = ChatMessageCRUD.count_messages(db, s.id)
@@ -135,10 +141,15 @@ async def list_sessions(page: int = 1, page_size: int = 50) -> ResponseModel:
 
 
 @router.post("/sessions", response_model=ResponseModel)
-async def create_session(request: CreateSessionRequest) -> ResponseModel:
+async def create_session(
+    request: CreateSessionRequest,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
     """创建新会话"""
     with get_db_session() as db:
-        session = ChatSessionCRUD.create(db, title=request.title, style_config=request.style_config)
+        session = ChatSessionCRUD.create(
+            db, user_id=current_user.id, title=request.title, style_config=request.style_config
+        )
         return ResponseModel(
             data=ChatSessionInfo(
                 id=session.id,

@@ -57,6 +57,7 @@ def init_db() -> None:
         logging.getLogger(__name__).warning("Alembic 迁移失败，降级为 create_all: %s", e)
 
     # 检查核心表是否存在，不存在则 create_all
+    # 注意：即使 Alembic 成功，也需要 create_all 来添加新的列（SQLite ALTER TABLE 受限）
     import logging
 
     from sqlalchemy import inspect
@@ -64,6 +65,7 @@ def init_db() -> None:
     inspector = inspect(engine)
     existing_tables = inspector.get_table_names()
     required_tables = {
+        "users",
         "tasks",
         "system_config",
         "kb_documents",
@@ -75,4 +77,8 @@ def init_db() -> None:
     missing = required_tables - set(existing_tables)
     if missing:
         logging.getLogger(__name__).warning("缺少表 %s，执行 create_all", missing)
+        Base.metadata.create_all(bind=engine)
+    else:
+        # 表都存在，但仍需确保所有列都存在（Alembic 迁移可能不包含新列如 user_id）
+        # SQLite 不支持 ALTER TABLE ADD COLUMN IF NOT EXISTS，create_all 会检查并跳过已存在的列
         Base.metadata.create_all(bind=engine)

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Layout,
@@ -35,24 +35,30 @@ const { Text } = Typography
 
 type MenuItem = Required<MenuProps>['items'][number]
 
-const menuItems: MenuItem[] = [
-  { key: '/', icon: <DashboardOutlined />, label: '工作台' },
-  { key: '/upload', icon: <UploadOutlined />, label: '文档上传' },
-  { key: '/tasks', icon: <FileTextOutlined />, label: '任务管理' },
-  { key: '/chat', icon: <MessageOutlined />, label: '对话排版' },
-  { key: '/templates', icon: <FileExcelOutlined />, label: '模板管理' },
-  { key: '/kb', icon: <DatabaseOutlined />, label: '知识库' },
-  { key: '/config', icon: <SettingOutlined />, label: '系统配置' },
-]
-
 const AppLayout: React.FC = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
   const [activeCount, setActiveCount] = useState(0)
+  const [username, setUsername] = useState<string>('用户')
+  const [userRole, setUserRole] = useState<string>('user')
   const {
     token: { colorBgContainer, borderRadiusLG },
   } = theme.useToken()
+
+  // 从 localStorage 读取用户信息
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('user_info')
+      if (raw) {
+        const info = JSON.parse(raw)
+        setUsername(info.username || '用户')
+        setUserRole(info.role || 'user')
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
 
   useEffect(() => {
     const fetchActiveCount = async () => {
@@ -81,16 +87,36 @@ const AppLayout: React.FC = () => {
     } else if (key === 'settings') {
       navigate('/config')
     } else if (key === 'logout') {
-      message.info('退出登录功能待开发')
+      localStorage.clear()
+      message.success('已退出登录')
+      navigate('/login', { replace: true })
     }
   }
 
   const userMenuItems: MenuItem[] = [
-    { key: 'profile', icon: <UserOutlined />, label: '个人中心' },
+    { key: 'profile', icon: <UserOutlined />, label: username },
     { key: 'settings', icon: <SettingOutlined />, label: '系统配置' },
     { type: 'divider' },
-    { key: 'logout', icon: <LogoutOutlined />, label: '退出登录' },
+    { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
   ]
+
+  // 根据角色过滤菜单项
+  const filteredMenuItems = useMemo(() => {
+    const allItems: MenuItem[] = [
+      { key: '/', icon: <DashboardOutlined />, label: '工作台' },
+      { key: '/upload', icon: <UploadOutlined />, label: '文档上传' },
+      { key: '/tasks', icon: <FileTextOutlined />, label: '任务管理' },
+      { key: '/chat', icon: <MessageOutlined />, label: '对话排版' },
+      { key: '/templates', icon: <FileExcelOutlined />, label: '模板管理' },
+      ...(userRole === 'admin'
+        ? [
+            { key: '/kb', icon: <DatabaseOutlined />, label: '知识库' },
+            { key: '/config', icon: <SettingOutlined />, label: '系统配置' },
+          ]
+        : []),
+    ]
+    return allItems
+  }, [userRole])
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -125,7 +151,7 @@ const AppLayout: React.FC = () => {
           theme="dark"
           mode="inline"
           selectedKeys={selectedKeys}
-          items={menuItems}
+          items={filteredMenuItems}
           onClick={handleMenuClick}
           style={{ borderRight: 0 }}
         />
@@ -170,7 +196,7 @@ const AppLayout: React.FC = () => {
             >
               <Space style={{ cursor: 'pointer' }}>
                 <Avatar icon={<UserOutlined />} size="small" />
-                <Text>管理员</Text>
+                <Text>{username}</Text>
                 <DownOutlined style={{ fontSize: 12 }} />
               </Space>
             </Dropdown>

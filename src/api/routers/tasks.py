@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse
 
+from src.api.middleware.auth import get_current_user
 from src.api.models import (
     ApplyTemplateRequest,
     BatchCreateTaskRequest,
@@ -21,6 +22,7 @@ from src.api.models import (
     UpdateContentRequest,
 )
 from src.api.services.task_manager import task_manager
+from src.db.models import UserModel
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -45,7 +47,10 @@ def _resolve_original_filename(upload_id: str, fallback: str) -> str:
 
 
 @router.post("", response_model=ResponseModel)
-async def create_task(request: CreateTaskRequest) -> ResponseModel:
+async def create_task(
+    request: CreateTaskRequest,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
     """创建排版任务"""
     try:
         # 查找上传的文件
@@ -69,6 +74,7 @@ async def create_task(request: CreateTaskRequest) -> ResponseModel:
         task = task_manager.create_task(
             upload_id=upload_id,
             filename=filename,
+            user_id=current_user.id,
             standard=request.standard,
             use_rag=request.use_rag,
             llm_model=request.llm_model,
@@ -87,7 +93,10 @@ async def create_task(request: CreateTaskRequest) -> ResponseModel:
 
 
 @router.post("/batch", response_model=ResponseModel)
-async def batch_create_tasks(request: BatchCreateTaskRequest) -> ResponseModel:
+async def batch_create_tasks(
+    request: BatchCreateTaskRequest,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
     """批量创建排版任务
 
     为每个 upload_id 创建独立任务，共享排版配置。
@@ -118,6 +127,7 @@ async def batch_create_tasks(request: BatchCreateTaskRequest) -> ResponseModel:
             task = task_manager.create_task(
                 upload_id=item.upload_id,
                 filename=filename,
+                user_id=current_user.id,
                 standard=request.standard,
                 use_rag=request.use_rag,
                 llm_model=request.llm_model,
@@ -137,11 +147,13 @@ async def batch_create_tasks(request: BatchCreateTaskRequest) -> ResponseModel:
 
 
 @router.get("/stats", response_model=ResponseModel)
-async def get_task_stats() -> ResponseModel:
+async def get_task_stats(
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
     """获取任务统计信息（Dashboard 用）"""
     try:
-        stats = task_manager.get_stats()
-        recent = task_manager.get_recent_tasks(limit=5)
+        stats = task_manager.get_stats(user_id=current_user.id)
+        recent = task_manager.get_recent_tasks(limit=5, user_id=current_user.id)
         return ResponseModel(
             data={
                 "stats": stats,
@@ -183,10 +195,13 @@ async def list_tasks(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     status: TaskStatus | None = Query(default=None),
+    current_user: UserModel = Depends(get_current_user),
 ) -> ResponseModel:
     """获取任务列表"""
     try:
-        tasks, total = task_manager.list_tasks(page=page, page_size=page_size, status=status.value if status else None)
+        tasks, total = task_manager.list_tasks(
+            page=page, page_size=page_size, status=status.value if status else None, user_id=current_user.id
+        )
         return ResponseModel(
             data=TaskListResponse(
                 total=total,
@@ -201,33 +216,48 @@ async def list_tasks(
 
 
 @router.get("/{task_id}", response_model=ResponseModel)
-async def get_task(task_id: str) -> ResponseModel:
+async def get_task(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
     """获取任务详情"""
-    task = task_manager.get_task(task_id)
+    task = task_manager.get_task(task_id, user_id=current_user.id)
     if not task:
         return ResponseModel(code=404, message="任务不存在")
     return ResponseModel(data=task_manager.to_detail_dict(task))
 
 
 @router.get("/{task_id}/status", response_model=ResponseModel)
-async def get_task_status(task_id: str) -> ResponseModel:
-    """获取任务状态（SSE 轮询用）"""
-    task = task_manager.get_task(task_id)
+async def get_task_status(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
+    """获取任务状态（轮询用）"""
+    task = task_manager.get_task(task_id, user_id=current_user.id)
     if not task:
         return ResponseModel(code=404, message="任务不存在")
     return ResponseModel(data=task_manager.to_info_dict(task))
 
 
 @router.post("/{task_id}/cancel", response_model=ResponseModel)
-async def cancel_task(task_id: str) -> ResponseModel:
+async def cancel_task(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
     """取消任务"""
+    task = task_manager.get_task(task_id, user_id=current_user.id)
+    if not task:
+        return ResponseModel(code=404, message="任务不存在")
     if task_manager.cancel_task(task_id):
         return ResponseModel(data={"cancelled": True})
     return ResponseModel(code=400, message="任务不存在或已完成/失败")
 
 
 @router.post("/{task_id}/retry", response_model=ResponseModel)
-async def retry_task(task_id: str) -> ResponseModel:
+async def retry_task(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
     """重试失败/取消的任务"""
     try:
         task = task_manager.retry_task(task_id)
@@ -241,17 +271,26 @@ async def retry_task(task_id: str) -> ResponseModel:
 
 
 @router.delete("/{task_id}", response_model=ResponseModel)
-async def delete_task(task_id: str) -> ResponseModel:
+async def delete_task(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
     """删除任务"""
+    task = task_manager.get_task(task_id, user_id=current_user.id)
+    if not task:
+        return ResponseModel(code=404, message="任务不存在")
     if task_manager.delete_task(task_id):
         return ResponseModel(data={"deleted": True})
     return ResponseModel(code=400, message="任务不存在或正在处理中，无法删除")
 
 
 @router.get("/{task_id}/download", response_model=ResponseModel)
-async def download_result(task_id: str) -> ResponseModel:
+async def download_result(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
     """获取下载信息"""
-    task = task_manager.get_task(task_id)
+    task = task_manager.get_task(task_id, user_id=current_user.id)
     if not task:
         return ResponseModel(code=404, message="任务不存在")
     if task.status != "completed":
@@ -266,9 +305,12 @@ async def download_result(task_id: str) -> ResponseModel:
 
 
 @router.get("/{task_id}/download/file")
-async def download_file(task_id: str):
+async def download_file(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_user),
+):
     """下载结果文件"""
-    task = task_manager.get_task(task_id)
+    task = task_manager.get_task(task_id, user_id=current_user.id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     if task.status != "completed":

@@ -32,8 +32,11 @@ class TaskCRUD:
         return db_task
 
     @staticmethod
-    def get(db: Session, task_id: str) -> TaskModel | None:
-        return db.query(TaskModel).filter(TaskModel.id == task_id).first()
+    def get(db: Session, task_id: str, user_id: str | None = None) -> TaskModel | None:
+        query = db.query(TaskModel).filter(TaskModel.id == task_id)
+        if user_id:
+            query = query.filter(TaskModel.user_id == user_id)
+        return query.first()
 
     @staticmethod
     def list_tasks(
@@ -41,8 +44,11 @@ class TaskCRUD:
         page: int = 1,
         page_size: int = 10,
         status: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[list[TaskModel], int]:
         query = db.query(TaskModel)
+        if user_id:
+            query = query.filter(TaskModel.user_id == user_id)
         if status:
             query = query.filter(TaskModel.status == status)
         total = query.count()
@@ -92,11 +98,14 @@ class TaskCRUD:
         return False
 
     @staticmethod
-    def count_by_status(db: Session) -> dict[str, int]:
+    def count_by_status(db: Session, user_id: str | None = None) -> dict[str, int]:
         """按状态统计任务数量"""
         from sqlalchemy import func
 
-        results = db.query(TaskModel.status, func.count(TaskModel.id)).group_by(TaskModel.status).all()
+        query = db.query(TaskModel.status, func.count(TaskModel.id))
+        if user_id:
+            query = query.filter(TaskModel.user_id == user_id)
+        results = query.group_by(TaskModel.status).all()
         counts = {"total": 0, "pending": 0, "processing": 0, "completed": 0, "failed": 0, "cancelled": 0}
         for status, count in results:
             counts[status] = count
@@ -104,9 +113,12 @@ class TaskCRUD:
         return counts
 
     @staticmethod
-    def get_recent(db: Session, limit: int = 5) -> list[TaskModel]:
+    def get_recent(db: Session, limit: int = 5, user_id: str | None = None) -> list[TaskModel]:
         """获取最近的任务"""
-        return db.query(TaskModel).order_by(TaskModel.created_at.desc()).limit(limit).all()
+        query = db.query(TaskModel)
+        if user_id:
+            query = query.filter(TaskModel.user_id == user_id)
+        return query.order_by(TaskModel.created_at.desc()).limit(limit).all()
 
 
 class KbDocumentCRUD:
@@ -165,8 +177,19 @@ class StyleTemplateCRUD:
         db: Session,
         page: int = 1,
         page_size: int = 50,
+        user_id: str | None = None,
     ) -> tuple[list[StyleTemplateModel], int]:
         query = db.query(StyleTemplateModel)
+        if user_id:
+            # 个人模板 + 系统预置模板(user_id IS NULL)
+            from sqlalchemy import or_
+
+            query = query.filter(
+                or_(
+                    StyleTemplateModel.user_id == user_id,
+                    StyleTemplateModel.user_id.is_(None),
+                )
+            )
         total = query.count()
         templates = (
             query.order_by(StyleTemplateModel.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
@@ -280,8 +303,8 @@ class ChatSessionCRUD:
     """对话会话 CRUD"""
 
     @staticmethod
-    def create(db: Session, title: str = "新对话", style_config: dict | None = None) -> ChatSessionModel:
-        session = ChatSessionModel(title=title, style_config=style_config or {})
+    def create(db: Session, user_id: str, title: str = "新对话", style_config: dict | None = None) -> ChatSessionModel:
+        session = ChatSessionModel(user_id=user_id, title=title, style_config=style_config or {})
         db.add(session)
         db.commit()
         db.refresh(session)
@@ -292,8 +315,12 @@ class ChatSessionCRUD:
         return db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
 
     @staticmethod
-    def list_sessions(db: Session, page: int = 1, page_size: int = 50) -> tuple[list[ChatSessionModel], int]:
+    def list_sessions(
+        db: Session, page: int = 1, page_size: int = 50, user_id: str | None = None
+    ) -> tuple[list[ChatSessionModel], int]:
         query = db.query(ChatSessionModel)
+        if user_id:
+            query = query.filter(ChatSessionModel.user_id == user_id)
         total = query.count()
         sessions = (
             query.order_by(ChatSessionModel.updated_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
@@ -339,12 +366,14 @@ class ChatMessageCRUD:
     def create(
         db: Session,
         session_id: str,
+        user_id: str,
         role: str,
         content: str,
         style_config_snapshot: dict | None = None,
     ) -> ChatMessageModel:
         msg = ChatMessageModel(
             session_id=session_id,
+            user_id=user_id,
             role=role,
             content=content,
             style_config_snapshot=style_config_snapshot,
@@ -405,9 +434,13 @@ class StyleAdjustmentHistoryCRUD:
         )
 
     @staticmethod
-    def list_recent(db: Session, limit: int = 10, standard: str | None = None) -> list[StyleAdjustmentHistoryModel]:
+    def list_recent(
+        db: Session, limit: int = 10, standard: str | None = None, user_id: str | None = None
+    ) -> list[StyleAdjustmentHistoryModel]:
         """获取最近的样式调整记录（用于 LLM few-shot 示例）"""
         query = db.query(StyleAdjustmentHistoryModel)
+        if user_id:
+            query = query.filter(StyleAdjustmentHistoryModel.user_id == user_id)
         if standard:
             query = query.filter(StyleAdjustmentHistoryModel.standard == standard)
         return query.order_by(StyleAdjustmentHistoryModel.created_at.desc()).limit(limit).all()
