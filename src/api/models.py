@@ -167,6 +167,13 @@ class KbSearchRequest(BaseModel):
     top_k: int = Field(default=5, description="返回结果数量")
 
 
+class KbUpdateContentRequest(BaseModel):
+    """知识库文档内容更新请求"""
+
+    content: str = Field(description="文档内容（Markdown/纯文本）")
+    rebuild_index: bool = Field(default=False, description="是否重建索引")
+
+
 # ────────── 样式模板 ──────────
 class SaveTemplateRequest(BaseModel):
     """保存样式模板请求"""

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Query, UploadFile
 
-from src.api.models import KbListResponse, KbSearchRequest, ResponseModel
+from src.api.models import KbListResponse, KbSearchRequest, KbUpdateContentRequest, ResponseModel
 from src.db.crud import KbDocumentCRUD
 from src.db.session import get_db_session
 from src.utils.file_utils import ensure_dir
@@ -116,6 +116,78 @@ async def delete_kb_document(doc_id: str) -> ResponseModel:
     except Exception as e:
         logger.exception("删除知识库文档失败")
         return ResponseModel(code=500, message=f"删除失败: {e}")
+
+
+@router.get("/content/{doc_id}", response_model=ResponseModel)
+async def get_kb_document_content(doc_id: str) -> ResponseModel:
+    """查看知识库文档内容"""
+    try:
+        with get_db_session() as db:
+            doc = KbDocumentCRUD.get(db, doc_id)
+            if not doc:
+                return ResponseModel(code=404, message="文档不存在")
+
+            file_path = Path(doc.source) if doc.source else None
+            if not file_path or not file_path.exists():
+                return ResponseModel(code=404, message="文档文件不存在，可能已被删除")
+
+            content = file_path.read_text(encoding="utf-8")
+            return ResponseModel(
+                data={
+                    "id": doc.id,
+                    "name": doc.name,
+                    "content": content,
+                    "source": doc.source,
+                    "status": doc.status,
+                }
+            )
+    except Exception as e:
+        logger.exception("获取知识库文档内容失败")
+        return ResponseModel(code=500, message=f"获取文档内容失败: {e}")
+
+
+@router.put("/content/{doc_id}", response_model=ResponseModel)
+async def update_kb_document_content(doc_id: str, request: KbUpdateContentRequest) -> ResponseModel:
+    """修改知识库文档内容"""
+    try:
+        with get_db_session() as db:
+            doc = KbDocumentCRUD.get(db, doc_id)
+            if not doc:
+                return ResponseModel(code=404, message="文档不存在")
+
+            file_path = Path(doc.source) if doc.source else None
+            if not file_path or not file_path.exists():
+                return ResponseModel(code=404, message="文档文件不存在，可能已被删除")
+
+            # 写入新内容
+            file_path.write_text(request.content, encoding="utf-8")
+            logger.info("知识库文档已更新: %s", file_path)
+
+            # 可选重建索引
+            rebuild_msg = ""
+            if request.rebuild_index:
+                try:
+                    from src.config import AppConfig
+                    from src.rag.knowledge_base_config import KnowledgeBaseManager
+
+                    config = AppConfig.load()
+                    kb_manager = KnowledgeBaseManager(config.rag)
+                    kb_manager.initialize()
+                    rebuild_msg = "，索引已重建"
+                except Exception as rebuild_err:
+                    logger.warning("重建索引失败: %s", rebuild_err)
+                    rebuild_msg = "，但索引重建失败"
+
+            return ResponseModel(
+                data={
+                    "updated": doc_id,
+                    "name": doc.name,
+                    "message": f"文档内容已更新{rebuild_msg}",
+                }
+            )
+    except Exception as e:
+        logger.exception("更新知识库文档内容失败")
+        return ResponseModel(code=500, message=f"更新文档内容失败: {e}")
 
 
 @router.post("/rebuild", response_model=ResponseModel)

@@ -199,6 +199,12 @@ export const getKbStats = () => api.get('/api/kb/stats')
 export const searchKb = (data: { query: string; top_k?: number }) =>
   api.post('/api/kb/search', data)
 
+export const getKbDocumentContent = (docId: string) =>
+  api.get(`/api/kb/content/${docId}`)
+
+export const updateKbDocumentContent = (docId: string, data: { content: string; rebuild_index?: boolean }) =>
+  api.put(`/api/kb/content/${docId}`, data)
+
 // ────────── 配置 ──────────
 export const getConfig = () => api.get('/api/config')
 

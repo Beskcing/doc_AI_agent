@@ -45,6 +45,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-09 | feat | 知识库文档查看/编辑功能: 新增GET/PUT /api/kb/content/{doc_id} API + 前端KbPage查看编辑弹窗 + SPA fallback改用404异常处理器解决路由冲突 |
 | 2026-07-08 | fix | Loop Engineering V7全面测试: 修复Formatters路由SPA fallback拦截+create_task文件校验+TemplatesPage stale state, 新增74项自动化测试 |
 | 2026-07-08 | fix | TaskDetailPage修正样式React State时序Bug修复(inline API调用避免stale closure) |
 | 2026-07-08 | fix | TemplatesPage手动创建extractedConfig空指针崩溃修复(添加null校验+友好提示) |

@@ -82,7 +82,18 @@ async def rate_limit_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# 注册路由
+# 前端路径
+_frontend_path = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+# 挂载前端静态文件（仅 /assets 目录）
+if _frontend_path.exists():
+    assets_path = _frontend_path / "assets"
+    if assets_path.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="frontend-assets")
+    logger.info("前端静态文件已挂载: %s", _frontend_path)
+
+
+# 注册 API 路由
 app.include_router(upload_router)
 app.include_router(tasks_router)
 app.include_router(kb_router)
@@ -111,9 +122,6 @@ async def health_check() -> dict:
 
 
 # 根路径（有前端时服务前端，无前端时返回 API 信息）
-_frontend_path = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
-
-
 @app.get("/", tags=["根路径"], response_model=None)
 async def root():
     """根路径"""
@@ -127,18 +135,10 @@ async def root():
     }
 
 
-# 挂载前端静态文件（生产模式）—— 必须放在所有 API 路由之后，避免拦截 API 请求
-if _frontend_path.exists():
-    assets_path = _frontend_path / "assets"
-    if assets_path.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="frontend-assets")
-
-    @app.get("/{full_path:path}")
-    async def _serve_frontend(full_path: str):
-        """SPA 前端路由回退 —— 仅对未被 API 路由匹配的路径生效"""
-        target = _frontend_path / full_path
-        if target.is_file():
-            return FileResponse(target)
+# SPA 前端路由回退 —— 捕获所有非 API 的 404 请求
+@app.exception_handler(404)
+async def spa_fallback_handler(request: Request, exc: Exception):
+    """对非 API 路径返回前端 index.html（SPA fallback）"""
+    if _frontend_path.exists() and not request.url.path.startswith("/api/"):
         return FileResponse(_frontend_path / "index.html")
-
-    logger.info("前端静态文件已挂载: %s", _frontend_path)
+    return JSONResponse(status_code=404, content={"code": 404, "message": "Not Found"})
