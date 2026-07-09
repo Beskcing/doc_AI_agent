@@ -46,7 +46,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
-| 2026-07-09 | docs | 新增使用文档 docs/USER_GUIDE.md (系统概述/快速上手/三条排版路径/模板管理/CLI/知识库/FAQ) + 迭代优化文档 docs/DEV_GUIDE.md (架构总览/新增Formatter/LLM+RAG路径/样式提取器优化/性能优化/测试规范/数据库迁移/开发FAQ) |
+| 2026-07-09 | feat | 磁盘管理与清理: 新增GET /api/tasks/disk-usage + POST /api/tasks/cleanup API + 前端Dashboard磁盘用量卡片+清理按钮 + MinerU解压后自动删除冗余_origin.pdf + debug.keep_intermediate_files配置控制中间产物保留 |
 | 2026-07-09 | fix | 补全GB/T 1.1标准选项: StandardOption新增GBT_1_1 + config API新增GB/T 1.1 + 前端默认选择GB/T 1.1 + CLI默认标准改为GB/T 1.1, 解决用户无法选择GB/T 1.1导致排版降级DocxStyler的问题 |
 | 2026-07-09 | feat | 知识库文档查看/编辑功能: 新增GET/PUT /api/kb/content/{doc_id} API + 前端KbPage查看编辑弹窗 + SPA fallback改用404异常处理器解决路由冲突 |
 | 2026-07-08 | fix | Loop Engineering V7全面测试: 修复Formatters路由SPA fallback拦截+create_task文件校验+TemplatesPage stale state, 新增74项自动化测试 |

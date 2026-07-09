@@ -213,6 +213,104 @@ class TaskManager:
         with get_db_session() as db:
             return TaskCRUD.count_by_status(db)
 
+    def get_disk_usage(self) -> dict:
+        """获取磁盘用量统计
+
+        Returns:
+            { output_mb, uploads_mb, total_mb, output_task_count }
+        """
+        output_dir = Path("data/output")
+        uploads_dir = Path("data/uploads")
+
+        def _dir_size(path: Path) -> float:
+            if not path.exists():
+                return 0.0
+            total = 0
+            for f in path.rglob("*"):
+                if f.is_file():
+                    try:
+                        total += f.stat().st_size
+                    except OSError:
+                        pass
+            return total / (1024 * 1024)
+
+        output_mb = round(_dir_size(output_dir), 2)
+        uploads_mb = round(_dir_size(uploads_dir), 2)
+        task_count = 0
+        if output_dir.exists():
+            task_count = sum(1 for d in output_dir.iterdir() if d.is_dir())
+
+        return {
+            "output_mb": output_mb,
+            "uploads_mb": uploads_mb,
+            "total_mb": round(output_mb + uploads_mb, 2),
+            "output_task_count": task_count,
+        }
+
+    def cleanup_old_tasks(self, older_than_days: int = 30, dry_run: bool = False) -> dict:
+        """清理超过 N 天的已完成/失败/取消任务的输出目录
+
+        只删除输出目录，保留数据库记录以便查看历史。
+
+        Args:
+            older_than_days: 清理多少天前的任务
+            dry_run: 仅计算不实际删除
+
+        Returns:
+            { deleted_count, freed_mb, scanned_count }
+        """
+        import shutil
+        from datetime import datetime, timedelta
+
+        cutoff = datetime.now() - timedelta(days=older_than_days)
+        output_dir = Path("data/output")
+        deleted_count = 0
+        freed_bytes = 0
+        scanned_count = 0
+
+        with get_db_session() as db:
+            # 查找超过 N 天且非 processing 状态的任务
+            tasks = (
+                db.query(TaskModel)
+                .filter(
+                    TaskModel.status.in_(["completed", "failed", "cancelled"]),
+                    TaskModel.created_at < cutoff,
+                )
+                .all()
+            )
+            scanned_count = len(tasks)
+
+            for task in tasks:
+                task_output = output_dir / task.id
+                if not task_output.exists():
+                    continue
+
+                # 计算目录大小
+                dir_size = 0
+                for f in task_output.rglob("*"):
+                    if f.is_file():
+                        try:
+                            dir_size += f.stat().st_size
+                        except OSError:
+                            pass
+
+                if not dry_run:
+                    shutil.rmtree(task_output, ignore_errors=True)
+                    logger.info("清理旧任务输出: %s (%.2f MB)", task.id, dir_size / 1024 / 1024)
+
+                deleted_count += 1
+                freed_bytes += dir_size
+
+        freed_mb = round(freed_bytes / (1024 * 1024), 2)
+        logger.info(
+            "清理完成: 扫描 %d 个任务, 删除 %d 个目录, 释放 %.2f MB%s",
+            scanned_count,
+            deleted_count,
+            freed_mb,
+            " (dry_run)" if dry_run else "",
+        )
+        return {"deleted_count": deleted_count, "freed_mb": freed_mb, "scanned_count": scanned_count}
+
     def get_recent_tasks(self, limit: int = 5) -> list[TaskModel]:
         """获取最近任务"""
         with get_db_session() as db:

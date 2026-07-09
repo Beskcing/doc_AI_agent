@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Card, Row, Col, Statistic, Table, Tag, Button, Space, Spin } from 'antd'
+import { Card, Row, Col, Statistic, Table, Tag, Button, Space, Spin, Modal, InputNumber, message, Tooltip } from 'antd'
 import {
   FileTextOutlined,
   CheckCircleOutlined,
@@ -8,9 +8,11 @@ import {
   CloseCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
+  HddOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getTaskStats } from '../services/api'
+import { getTaskStats, getDiskUsage, cleanupOldTasks } from '../services/api'
 
 interface StatsData {
   stats: {
@@ -31,10 +33,21 @@ interface StatsData {
   }>
 }
 
+interface DiskUsage {
+  output_mb: number
+  uploads_mb: number
+  total_mb: number
+  output_task_count: number
+}
+
 const Dashboard: React.FC = () => {
   const navigate = useNavigate()
   const [data, setData] = useState<StatsData | null>(null)
+  const [diskUsage, setDiskUsage] = useState<DiskUsage | null>(null)
   const [loading, setLoading] = useState(true)
+  const [cleanupModalOpen, setCleanupModalOpen] = useState(false)
+  const [cleanupDays, setCleanupDays] = useState(30)
+  const [cleanupLoading, setCleanupLoading] = useState(false)
 
   const fetchData = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
@@ -46,6 +59,14 @@ const Dashboard: React.FC = () => {
     } finally {
       if (showLoading) setLoading(false)
     }
+
+    // 后台获取磁盘用量（不阻塞 loading 状态）
+    try {
+      const diskRes = await getDiskUsage()
+      setDiskUsage(diskRes.data.data)
+    } catch {
+      // 静默失败
+    }
   }, [])
 
   useEffect(() => {
@@ -54,7 +75,33 @@ const Dashboard: React.FC = () => {
     return () => clearInterval(interval)
   }, [fetchData])
 
+  const handleCleanup = async () => {
+    setCleanupLoading(true)
+    try {
+      const res = await cleanupOldTasks({ older_than_days: cleanupDays })
+      const result = res.data.data
+      message.success(
+        `已清理 ${result.deleted_count} 个任务输出目录，释放 ${result.freed_mb} MB（共扫描 ${result.scanned_count} 个任务）`
+      )
+      setCleanupModalOpen(false)
+      // 刷新数据
+      fetchData(false)
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : '清理失败'
+      message.error(errMsg)
+    } finally {
+      setCleanupLoading(false)
+    }
+  }
+
   const stats = data?.stats || { total: 0, pending: 0, processing: 0, completed: 0, failed: 0, cancelled: 0 }
+
+  const formatDiskSize = (mb: number) => {
+    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
+    return `${mb.toFixed(0)} MB`
+  }
+
+  const diskUsageColor = diskUsage ? (diskUsage.total_mb > 500 ? '#ff4d4f' : diskUsage.total_mb > 200 ? '#faad14' : '#52c41a') : '#1890ff'
 
   const statCards = [
     { title: '总任务数', value: stats.total, icon: <FileTextOutlined style={{ color: '#1890ff', fontSize: 40 }} /> },
@@ -94,6 +141,19 @@ const Dashboard: React.FC = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <h2 style={{ margin: 0 }}>工作台</h2>
         <Space>
+          <Tooltip title={diskUsage ? `磁盘占用: ${formatDiskSize(diskUsage.total_mb)}（${diskUsage.output_task_count} 个任务目录）` : '加载中...'}>
+            <Button icon={<HddOutlined />}>
+              磁盘 {diskUsage ? formatDiskSize(diskUsage.total_mb) : '...'}
+            </Button>
+          </Tooltip>
+          <Button
+            icon={<DeleteOutlined />}
+            danger
+            onClick={() => setCleanupModalOpen(true)}
+            disabled={!diskUsage || diskUsage.output_task_count === 0}
+          >
+            清理旧文件
+          </Button>
           <Button icon={<ReloadOutlined />} onClick={() => fetchData(true)} loading={loading}>
             刷新
           </Button>
@@ -120,6 +180,18 @@ const Dashboard: React.FC = () => {
                 </Card>
               </Col>
             ))}
+            <Col span={6}>
+              <Card hoverable>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <HddOutlined style={{ color: diskUsageColor, fontSize: 40 }} />
+                  <Statistic
+                    title="磁盘占用"
+                    value={diskUsage ? formatDiskSize(diskUsage.total_mb) : '...'}
+                    valueStyle={{ color: diskUsageColor }}
+                  />
+                </div>
+              </Card>
+            </Col>
           </Row>
 
           <Card
@@ -139,6 +211,37 @@ const Dashboard: React.FC = () => {
           </Card>
         </>
       )}
+
+      <Modal
+        title="清理旧任务输出"
+        open={cleanupModalOpen}
+        onOk={handleCleanup}
+        onCancel={() => setCleanupModalOpen(false)}
+        confirmLoading={cleanupLoading}
+        okText="立即清理"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+      >
+        <p style={{ marginBottom: 16 }}>
+          此操作将清理指定天数前的已完成/失败/取消任务的输出目录，
+          <strong>但会保留任务历史记录</strong>（仅删除磁盘文件）。
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>清理</span>
+          <InputNumber
+            min={1}
+            max={365}
+            value={cleanupDays}
+            onChange={(v) => setCleanupDays(v || 30)}
+            style={{ width: 100 }}
+          />
+          <span>天前的任务输出</span>
+        </div>
+        <p style={{ marginTop: 12, color: '#888', fontSize: 12 }}>
+          当前磁盘占用: {diskUsage ? formatDiskSize(diskUsage.total_mb) : '...'}，
+          {diskUsage ? `${diskUsage.output_task_count} 个任务目录` : ''}
+        </p>
+      </Modal>
     </div>
   )
 }

@@ -450,6 +450,15 @@ class MinerUAPIClient:
 
         logger.info("解压完成: %d 文件, markdown=%s", len(names), markdown_path)
 
+        # 清理冗余文件：MinerU ZIP 内含的原始 PDF 与 uploads/ 重复
+        origin_pdfs = list(output_dir.glob("*_origin.pdf"))
+        for op in origin_pdfs:
+            try:
+                op.unlink()
+                logger.debug("已删除冗余 origin.pdf: %s", op.name)
+            except OSError:
+                pass
+
         # 查找 MinerU 提供的 DOCX 文件（extra_formats 输出）
         mineru_docx_path = None
         if docx_files:

@@ -230,6 +230,10 @@ class PipelineService:
                 task_db.config = new_config
                 db.commit()
 
+        # ── 调试模式：非 debug 时清理中间产物 ──
+        if not self.deps.config.debug.keep_intermediate_files:
+            self._cleanup_intermediates(task_id)
+
         return cleaned_markdown, styled_path, mineru_docx_path, style_config
 
     def _parse_input(self, task_id: str, file_path: str) -> tuple[str, str, str | None]:
@@ -819,6 +823,29 @@ class PipelineService:
             except Exception as e:
                 logger.warning("获取 few-shot 示例失败: %s", e)
                 return "暂无历史调整记录。"
+
+    def _cleanup_intermediates(self, task_id: str) -> None:
+        """清理管线中间产物（非 debug 模式）
+
+        删除 *_content_list.json, *_model.json, full.md。
+        保留 cleaned.md（预览降级用）、full.docx（MinerU 原始预览用）、formatted_styled.docx（最终产物）。
+        """
+        output_dir = Path("data/output") / task_id
+        if not output_dir.exists():
+            return
+
+        patterns = ["*_content_list.json", "*_content_list_v2.json", "*_model.json", "full.md"]
+        deleted = 0
+        for pattern in patterns:
+            for f in output_dir.glob(pattern):
+                try:
+                    f.unlink()
+                    deleted += 1
+                except OSError:
+                    pass
+
+        if deleted:
+            logger.info("任务 %s: 已清理 %d 个中间产物文件", task_id, deleted)
 
     def _default_style_config(self) -> dict:
         """默认样式配置（GB/T 1.1 国标编写规则）

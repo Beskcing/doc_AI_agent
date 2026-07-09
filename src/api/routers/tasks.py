@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from src.api.models import (
     ApplyTemplateRequest,
     BatchCreateTaskRequest,
+    CleanupRequest,
     CreateTaskRequest,
     ResponseModel,
     SaveStyleToTemplateRequest,
@@ -150,6 +151,31 @@ async def get_task_stats() -> ResponseModel:
     except Exception as e:
         logger.exception("获取统计失败")
         return ResponseModel(code=500, message=f"获取统计失败: {e}")
+
+
+@router.get("/disk-usage", response_model=ResponseModel)
+async def get_disk_usage() -> ResponseModel:
+    """获取磁盘用量统计（Dashboard 用）"""
+    try:
+        usage = task_manager.get_disk_usage()
+        return ResponseModel(data=usage)
+    except Exception as e:
+        logger.exception("获取磁盘用量失败")
+        return ResponseModel(code=500, message=f"获取磁盘用量失败: {e}")
+
+
+@router.post("/cleanup", response_model=ResponseModel)
+async def cleanup_old_tasks(request: CleanupRequest) -> ResponseModel:
+    """批量清理旧任务输出目录（保留 DB 记录）"""
+    try:
+        result = task_manager.cleanup_old_tasks(
+            older_than_days=request.older_than_days,
+            dry_run=request.dry_run,
+        )
+        return ResponseModel(data=result)
+    except Exception as e:
+        logger.exception("批量清理失败")
+        return ResponseModel(code=500, message=f"批量清理失败: {e}")
 
 
 @router.get("", response_model=ResponseModel)

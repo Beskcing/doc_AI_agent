@@ -51,3 +51,6 @@ mineru:
   poll_interval: 5             # 轮询间隔（秒）
   poll_timeout: 600            # 轮询总超时（秒）
   request_timeout: 120         # HTTP 请求超时（秒）
+
+debug:
+  keep_intermediate_files: false  # true 保留 LLM 中间 JSON / full.md，false 自动清理

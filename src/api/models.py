@@ -300,6 +300,14 @@ class StyleAdjustmentInfo(BaseModel):
     created_at: datetime = Field(description="创建时间")
 
 
+# ────────── 磁盘管理 ──────────
+class CleanupRequest(BaseModel):
+    """批量清理请求"""
+
+    older_than_days: int = Field(default=30, ge=1, le=365, description="清理多少天前的任务输出")
+    dry_run: bool = Field(default=False, description="仅计算不实际删除")
+
+
 # ────────── 内容编辑 ──────────
 class UpdateContentRequest(BaseModel):
     """更新文档内容请求"""

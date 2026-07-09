@@ -110,6 +110,12 @@ class PandocConfig(BaseModel):
     extra_args: list[str] = Field(default_factory=lambda: ["--from=markdown+raw_html", "--to=docx"])
 
 
+class DebugConfig(BaseModel):
+    """调试配置"""
+
+    keep_intermediate_files: bool = False
+
+
 class AppConfig(BaseModel):
     """应用全局配置"""
 
@@ -118,6 +124,7 @@ class AppConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     pandoc: PandocConfig = Field(default_factory=PandocConfig)
     mineru: MinerUConfig = Field(default_factory=MinerUConfig)
+    debug: DebugConfig = Field(default_factory=DebugConfig)
 
     @classmethod
     def load(cls, config_path: str | Path | None = None) -> AppConfig:
@@ -193,6 +200,7 @@ class AppConfig(BaseModel):
             paths=PathsConfig(**paths_raw),
             pandoc=PandocConfig(**raw.get("pandoc", {})),
             mineru=MinerUConfig(**raw.get("mineru", {})),
+            debug=DebugConfig(**raw.get("debug", {})),
         )
 
     def _validate_required(self) -> None:

@@ -83,6 +83,11 @@ export const getDocxPreviewUrl = (taskId: string) => `${API_BASE}/api/tasks/${ta
 
 export const getTaskStats = () => api.get('/api/tasks/stats')
 
+export const getDiskUsage = () => api.get('/api/tasks/disk-usage')
+
+export const cleanupOldTasks = (data: { older_than_days: number; dry_run?: boolean }) =>
+  api.post('/api/tasks/cleanup', data)
+
 export const getDownloadInfo = (taskId: string) => api.get(`/api/tasks/${taskId}/download`)
 
 export const getDownloadUrl = (taskId: string) => `${API_BASE}/api/tasks/${taskId}/download/file`
