@@ -60,6 +60,8 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-10 | fix | TinyMCE编辑器无法加载: main.py新增/tinymce静态文件挂载, 修复SPA fallback拦截导致返回index.html而非JS的问题 |
+| 2026-07-10 | fix | DOCX下载失败(401): TaskDetailPage下载改用fetch+Blob携带JWT token, 替换window.open(不会带Authorization头) |
 | 2026-07-10 | feat | 管理员用户管理前端页面: AdminUsersPage(表格+创建/编辑弹窗+删除+启用禁用) + api.ts 4个管理API + App路由/admin/users + AppLayout菜单集成 |
 | 2026-07-10 | fix | Docker Alembic迁移修复: env.py通过DATABASE_URL环境变量覆盖alembic.ini硬编码SQLite, 容器内alembic正确连接PostgreSQL |
 | 2026-07-10 | fix | Docker部署依赖补全: pyproject.toml添加psycopg2-binary/celery/redis/bcrypt |

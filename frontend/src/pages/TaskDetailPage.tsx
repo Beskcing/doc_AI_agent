@@ -281,9 +281,39 @@ const TaskDetailPage: React.FC = () => {
     }
   }
 
+  const downloadWithAuth = async (url: string, filename: string) => {
+    const token = localStorage.getItem('access_token')
+    try {
+      const response = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!response.ok) {
+        if (response.status === 401) {
+          message.error('登录已过期，请重新登录')
+          localStorage.clear()
+          window.location.href = '/login'
+          return
+        }
+        message.error(`下载失败: ${response.status}`)
+        return
+      }
+      const blob = await response.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename || 'download.docx'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(blobUrl)
+    } catch (err: any) {
+      message.error('下载失败，请检查网络连接')
+    }
+  }
+
   const handleDownload = () => {
     if (!taskId) return
-    window.open(getDownloadUrl(taskId), '_blank')
+    downloadWithAuth(getDownloadUrl(taskId), task?.filename?.replace(/\.pdf$/i, '') + '_排版结果.docx' || 'result.docx')
   }
 
   const fetchReview = useCallback(async (type?: string) => {
@@ -587,7 +617,7 @@ const TaskDetailPage: React.FC = () => {
 
   const handleMineruDocxDownload = () => {
     if (!taskId) return
-    window.open(getMineruDocxDownloadUrl(taskId), '_blank')
+    downloadWithAuth(getMineruDocxDownloadUrl(taskId), task?.filename?.replace(/\.pdf$/i, '') + '_MinerU原始.docx' || 'mineru_original.docx')
   }
 
   const handleRetry = async () => {

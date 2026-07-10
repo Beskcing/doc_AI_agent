@@ -94,11 +94,14 @@ async def rate_limit_middleware(request: Request, call_next):
 # 前端路径
 _frontend_path = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
-# 挂载前端静态文件（仅 /assets 目录）
+# 挂载前端静态文件（/assets 和 /tinymce 目录）
 if _frontend_path.exists():
     assets_path = _frontend_path / "assets"
     if assets_path.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_path)), name="frontend-assets")
+    tinymce_path = _frontend_path / "tinymce"
+    if tinymce_path.exists():
+        app.mount("/tinymce", StaticFiles(directory=str(tinymce_path)), name="frontend-tinymce")
     logger.info("前端静态文件已挂载: %s", _frontend_path)
 
 
