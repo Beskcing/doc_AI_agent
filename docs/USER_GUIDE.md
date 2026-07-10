@@ -54,10 +54,23 @@
 
 管理员可查看所有用户的任务、对话、模板，并可管理用户账号（创建/重置密码/禁用/删除）。详见第十节。
 
-> 如管理员账号不存在，可通过后端 API 创建：
-> ```python
-> python -c "from src.db.crud import UserCRUD; from src.db.session import get_db_session; from src.api.middleware.auth import hash_password; db=get_db_session().__enter__(); UserCRUD.create(db, 'admin', hash_password('Admin@123'), 'admin')"
+> **注意**：Docker 部署会创建全新的 PostgreSQL 数据库，初始无任何用户。首次启动后需手动创建管理员账号：
+> ```bash
+> docker exec doc-ai-agent python -c "
+> from src.db.database import SessionLocal
+> from src.db.crud import UserCRUD
+> import bcrypt
+> db = SessionLocal()
+> UserCRUD.create(db,
+>     username='admin',
+>     password_hash=bcrypt.hashpw('Admin@123'.encode(), bcrypt.gensalt()).decode(),
+>     role='admin')
+> db.close()
+> print('管理员创建成功')
+> "
 > ```
+>
+> 本地手动开发启动时，如数据库中无管理员账号，也可用上面命令创建。
 
 ### 2.4 角色与权限
 
@@ -92,13 +105,29 @@
 
 **Docker 一键启动（推荐）：**
 
+需先在项目根目录配置 `.env` 文件（含 `MINERU_API_TOKEN`、`DASHSCOPE_API_KEY` 等），然后：
+
 ```bash
 docker compose up -d
 ```
 
+容器列表（7个）：
+
+| 容器 | 说明 |
+|------|------|
+| `doc-ai-agent` | FastAPI 后端 + SPA 前端 |
+| `doc-ai-postgres` | PostgreSQL 16 数据库 |
+| `doc-ai-redis` | Redis 7 缓存/消息队列 |
+| `celery-worker` ×4 | 异步任务队列 |
+
 - 后端 API：`http://localhost:8000`
 - 前端界面：`http://localhost:8000`（SPA 由后端托管）
 - API 文档：`http://localhost:8000/docs`
+
+> **首次启动注意事项**：
+> 1. Docker 使用全新 PostgreSQL 数据库，表结构由 Alembic 自动迁移
+> 2. 初始无任何用户，需手动创建管理员账号（见 §2.3）
+> 3. 确认所有容器状态为 `healthy`：`docker compose ps`
 
 **手动开发启动：**
 

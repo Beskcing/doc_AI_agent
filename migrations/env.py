@@ -1,3 +1,9 @@
+"""Alembic env — 支持 DATABASE_URL 环境变量覆盖 alembic.ini 硬编码
+
+Docker 部署时通过 DATABASE_URL 连接 PostgreSQL，本地开发使用 SQLite 默认值。
+"""
+
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -8,6 +14,11 @@ from alembic import context
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Docker 部署：DATABASE_URL 环境变量覆盖 alembic.ini 的默认 SQLite
+_db_url = os.getenv("DATABASE_URL")
+if _db_url:
+    config.set_main_option("sqlalchemy.url", _db_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

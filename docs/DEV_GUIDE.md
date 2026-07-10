@@ -107,7 +107,7 @@ DocxStyler / GbtDocxFormatter → 输出 DOCX
 | `src/api/routers/auth.py` | 用户注册/登录/Token 刷新 API |
 | `src/api/routers/admin.py` | 管理员 API（用户 CRUD + 级联删除） |
 | `src/db/crud.py` | 数据访问层（含 UserCRUD / TaskCRUD / ChatSessionCRUD 等） |
-| `src/db/models.py` | 8 张表 ORM 模型（含 UserModel） |
+| `src/db/models.py` | 9 张表 ORM 模型（含 UserModel / TaskReviewModel） |
 | `src/utils/file_utils.py` | 文件系统工具（按 user_id 隔离的路径） |
 | `src/tools/formatters/registry.py` | Formatter 自动发现 + 注册表 |
 | `src/tools/formatters/base.py` | Formatter 抽象基类 |
@@ -570,12 +570,13 @@ npm run lint              # ESLint 检查
 
 ### 7.1 数据模型
 
-核心表位于 `src/db/models.py`（共 8 张表）：
+核心表位于 `src/db/models.py`（共 9 张表）：
 
 | 表名 | 说明 | user_id 隔离 |
 |------|------|:---:|
 | `users` | 用户账号（username/password_hash/role/is_active） | — |
 | `tasks` | 排版任务 | Y |
+| `task_reviews` | 排版后审查结果（quick_review + deep_review） | Y |
 | `chat_sessions` | 对话会话 | Y |
 | `chat_messages` | 对话消息（级联 session） | Y |
 | `style_templates` | 样式模板（user_id=NULL 为系统预置） | Y |
@@ -584,6 +585,8 @@ npm run lint              # ESLint 检查
 | `system_config` | 系统配置（全局单条记录） | — |
 
 ### 7.2 Alembic 迁移
+
+**本地开发（SQLite）：**
 
 ```bash
 # 生成迁移脚本
@@ -595,6 +598,12 @@ alembic upgrade head
 # 回滚
 alembic downgrade -1
 ```
+
+**Docker 部署（PostgreSQL）：**
+
+`migrations/env.py` 已配置从 `DATABASE_URL` 环境变量读取数据库连接（Docker Compose 自动注入），覆盖 `alembic.ini` 的默认 SQLite 连接。容器启动时 `init_db()` 自动执行 `alembic upgrade head`。
+
+> 如果数据库已通过 `create_all` 降级方案创建了表，导致 alembic 报 `already exists` 错误，执行 `alembic stamp head` 标记当前状态后，后续迁移即可正常进行。
 
 ### 7.3 模板标准号匹配策略
 
@@ -903,6 +912,7 @@ Alembic 迁移链（`migrations/versions/`）：
 base → 5e132870e319 (初始建表)
      → 820ed49c4fca (添加 style_templates.standard 字段)
      → 3a7f1c2d4e5f (新增 users 表 + 各表 user_id 列) ← SaaS 改造
+     → 08deb19fab7e (新增 task_reviews 表)          ← 排版审查
 ```
 
 **新增业务表时加入 user_id：**
@@ -941,6 +951,10 @@ def list_new_items(db: Session, page: int, page_size: int, user_id: str | None =
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-10 | fix | Docker Alembic迁移修复: env.py 读取 DATABASE_URL 环境变量, Docker 容器内 alembic 正确连接 PostgreSQL |
+| 2026-07-10 | fix | Docker 部署依赖补全: pyproject.toml 添加 psycopg2-binary/celery/redis/bcrypt |
+| 2026-07-10 | fix | 排版后审查误报修复: quick_review 异常 Unicode 正则扩充合法字符范围(拉丁扩展/希腊字母/数学运算符等), 消除技术文档 100% 误报 |
+| 2026-07-10 | feat | 排版后 LLM 全文审查: DocxTextExtractor + TextDiff 增量对比 + DocxReviewService(quick_review 规则 + deep_review LLM 分块) + TaskReviewModel + 前端审查面板 |
 | 2026-07-09 | feat | 多用户 SaaS 架构改造: JWT + bcrypt 认证, 7 表 user_id 隔离, PostgreSQL 支持, Celery + Redis 异步队列, 文件系统按 user_id 目录隔离, 前端 LoginPage/AuthGuard/role-based 菜单, 管理员全局视图 |
 | 2026-07-09 | feat | 管理员功能补全: 用户账号管理 API (CRUD/重置密码/禁用/级联删除), 管理员全局数据视图 (tasks/chat/stats/disk-usage 路由 admin 分支) |
 | 2026-07-09 | docs | 文档全面更新: AGENTS.md/USER_GUIDE.md/DEV_GUIDE.md 三个文档的 SaaS 多用户章节补全 |
