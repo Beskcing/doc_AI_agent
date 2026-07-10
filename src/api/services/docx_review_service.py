@@ -25,12 +25,15 @@ from src.utils.text_diff import DiffResult, compute_diff, get_changed_text
 logger = get_logger(__name__)
 
 # 快速审查：规则化检查的常见 OCR 错误模式
+# 注：异常 Unicode 检测已扩充合法字符范围，涵盖国标技术文档常见符号：
+#   拉丁扩展(U+00B0-00FF)、希腊字母(U+0370-03FF)、通用标点(U+2000-206F)
+#   上下标(U+2070-209F)、类字母符号(U+2100-214F)、箭头(U+2190-21FF)、数学运算符(U+2200-22FF)
 _QUICK_CHECK_PATTERNS: list[tuple[str, str, str, str]] = [
     # (正则模式, 错误类型, 位置提示, 修正建议)
     (r"[a-zA-Z]{2,}[，。；：]", "format", "英文单词后出现中文标点", "将中文标点替换为英文标点"),
     (r"\d+[。，]\d+", "text", "数字间出现中文标点", "将中文标点替换为小数点或英文逗号"),
     (
-        r"[^\x00-\x7f\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]",
+        r"[^\x00-\x7f\u00b0-\u00ff\u0370-\u03ff\u2000-\u206f\u2070-\u209f\u2100-\u214f\u2190-\u21ff\u2200-\u22ff\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]",
         "ocr",
         "包含异常 Unicode 字符（疑似乱码）",
         "检查是否为 OCR 识别错误",
