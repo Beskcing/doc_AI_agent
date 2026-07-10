@@ -73,7 +73,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: doc-ai-celery-worker
     command: python scripts/run_worker.py
     environment:
       - MINERU_API_TOKEN=${MINERU_API_TOKEN}
