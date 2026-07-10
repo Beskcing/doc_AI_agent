@@ -97,5 +97,6 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 | 2026-07-03 | feat | MinerU原始DOCX优先管线+批量上传+样式提取全面增强 |
 | 2026-07-03 | fix | 全栈测试6个Bug修复(Loop Engineering首轮) |
 | 2026-07-09 | feat | 管理员账号创建(admin/Admin@123) + 遗留任务文件迁移到admin目录 + 测试数据清理 |
+| 2026-07-09 | feat | Nginx 反向代理配置 (nginx.conf) — 支持自定义域名部署 + HTTPS/SSL |
 | 2026-07-09 | feat | 管理员功能补全: 用户账号管理API(CRUD/重置密码/禁用/级联删除) + 管理员全局数据视图(tasks/chat/stats/disk-usage路由admin分支) |
 | 2026-07-09 | docs | 文档全面更新: AGENTS.md(多用户SaaS架构/技术栈/关键路径) + USER_GUIDE.md(账号认证章节/管理员功能章节) + DEV_GUIDE.md(SaaS多用户开发模式/认证鉴权/Celery异步/Frontend认证) |
