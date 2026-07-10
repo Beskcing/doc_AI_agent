@@ -58,6 +58,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-10 | fix | Docker部署修复: pyproject.toml补全psycopg2-binary/celery/redis/bcrypt依赖, Docker容器正常启动(PostgreSQL+Redis+Celery) |
 | 2026-07-10 | fix | quick_review: 异常Unicode检测正则扩充合法字符范围(拉丁扩展/希腊字母/通用标点/上下标/数学运算符), 消除GB/T技术文档中100%误报(437→0) |
 | 2026-07-10 | fix | quick_review: cleaned_markdown_preview为空时跳过TextDiff，避免全文标记为added |
 | 2026-07-10 | feat | 排版后LLM全文审查: 新增DocxTextExtractor(DOCX文本提取)+TextDiff(增量对比)+DocxReviewService(quick_review规则+deep_review LLM分块)+TaskReviewModel+review API路由(GET/POST)+管线集成自动快速审查+前端审查面板(类型/严重程度/原文建议对比)+深度审查触发按钮+进度轮询 |
