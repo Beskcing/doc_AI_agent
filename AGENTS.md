@@ -21,7 +21,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 ## 关键路径
 - 工作流：`src/workflows/doc_formatting_graph.py` | LLM 封装：`src/llm_client.py`
-- 工具链：`src/tools/` (mineru_parser, pandoc_converter, docx_styler, gbt_docx_formatter, markdown_cleaner, html_table_preserver, content_normalizer, content_pattern_matcher, docx_normalizer)
+- 工具链：`src/tools/` (mineru_parser, pandoc_converter, docx_styler, gbt_docx_formatter, markdown_cleaner, html_table_preserver, content_normalizer, content_pattern_matcher, docx_normalizer, docx_text_extractor)
 - Formatter 注册系统：`src/tools/formatters/` (base/registry/gbt_1_1, 支持用户通过 Python 脚本注册自定义格式规范)
 - 格式规范分类匹配：`src/db/crud.py` StyleTemplateCRUD.match_by_standard() 三级策略(精确→模糊→名称), 模板 standard 字段显式绑定标准号
 - RAG：`src/rag/` | API：`src/api/` (含 formatters 路由查询注册表) | DB：`src/db/` | 前端：`frontend/`
@@ -29,7 +29,8 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 - 管理员路由：`src/api/routers/admin.py` (用户CRUD/级联删除, get_current_admin 保护)
 - 用户数据隔离：`src/utils/file_utils.py` (按 user_id 目录隔离上传/输出) | `src/db/crud.py` UserCRUD (级联删除)
 - 异步任务：`src/api/services/celery_app.py` + `src/api/services/pipeline_task.py` (Celery + ThreadPoolExecutor 降级)
-- 提示词：`prompts/` | 配置：`configs/settings.yaml` | 文档：`docs/USER_GUIDE.md` (使用) `docs/DEV_GUIDE.md` (开发) `docs/ARCHITECTURE.md` (架构)
+- 排版后审查：`src/api/services/docx_review_service.py` (DocxReviewService: quick_review规则检查 + deep_review LLM分块审查) | `src/api/routers/review.py` (GET/POST审查API) | `src/utils/text_diff.py` (文本差异对比) | `src/tools/docx_text_extractor.py` (DOCX文本提取)
+- 提示词：`prompts/` (含 docx_review_prompt.md 排版后审查提示词) | 配置：`configs/settings.yaml` | 文档：`docs/USER_GUIDE.md` (使用) `docs/DEV_GUIDE.md` (开发) `docs/ARCHITECTURE.md` (架构)
 
 ## 工程规范
 
@@ -37,7 +38,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 2. **RAG 集成**：Chunk Size 600-800 / Overlap 15%，必须混合检索（BM25 + 向量），输出提供 rag_sources 来源追溯。
 3. **多用户隔离**：所有用户数据通过 `user_id` 隔离，文件系统按 `data/{uploads,output}/{user_id}/` 组织，路由层通过 `get_current_user` 依赖注入自动过滤。管理员通过 `role == "admin"` 获得全局视图。
 4. **代码与测试**：MinerU/Pandoc 改动须附 PDF 测试用例，核心渲染函数须有单元测试，前端须通过 `tsc --noEmit`，API 变更同步更新 E2E 测试。
-5. **数据库**：SQLAlchemy 2.0 ORM，模型在 `src/db/models.py`（含 8 张表：tasks/chat_sessions/chat_messages/style_templates/style_adjustment_history/kb_documents/system_config/users），CRUD 在 `src/db/crud.py`，路由层不直接操作 DB。
+5. **数据库**：SQLAlchemy 2.0 ORM，模型在 `src/db/models.py`（含 9 张表：tasks/chat_sessions/chat_messages/style_templates/style_adjustment_history/kb_documents/system_config/users/task_reviews），CRUD 在 `src/db/crud.py`，路由层不直接操作 DB。
 6. **文档同步**：行为/工具链变更时更新 AGENTS.md，新增排版规则更新至 RAG 知识库。
 7. **Git 提交（强制）**：每次变更后 `git add -A` + `git commit`（前缀 `feat:/fix:/refactor:/docs:`）+ 更新 AGENTS.md + `git push origin master`。远程：`https://github.com/Beskcing/doc_AI_agent.git`
 8. **变更前讨论（强制）**：每次想要修改或增加功能时，必须先与用户讨论方案、达成一致后，方可开始编码。严禁未经讨论直接动手改代码。
@@ -57,6 +58,8 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-10 | fix | quick_review: cleaned_markdown_preview为空时跳过TextDiff，避免全文标记为added |
+| 2026-07-10 | feat | 排版后LLM全文审查: 新增DocxTextExtractor(DOCX文本提取)+TextDiff(增量对比)+DocxReviewService(quick_review规则+deep_review LLM分块)+TaskReviewModel+review API路由(GET/POST)+管线集成自动快速审查+前端审查面板(类型/严重程度/原文建议对比)+深度审查触发按钮+进度轮询 |
 | 2026-07-09 | feat | 磁盘管理与清理: 新增GET /api/tasks/disk-usage + POST /api/tasks/cleanup API + 前端Dashboard磁盘用量卡片+清理按钮 + MinerU解压后自动删除冗余_origin.pdf + debug.keep_intermediate_files配置控制中间产物保留 |
 | 2026-07-09 | fix | 补全GB/T 1.1标准选项: StandardOption新增GBT_1_1 + config API新增GB/T 1.1 + 前端默认选择GB/T 1.1 + CLI默认标准改为GB/T 1.1, 解决用户无法选择GB/T 1.1导致排版降级DocxStyler的问题 |
 | 2026-07-09 | feat | 知识库文档查看/编辑功能: 新增GET/PUT /api/kb/content/{doc_id} API + 前端KbPage查看编辑弹窗 + SPA fallback改用404异常处理器解决路由冲突 |

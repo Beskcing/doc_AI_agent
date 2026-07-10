@@ -420,3 +420,53 @@ class AdminUpdateUserRequest(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=64, description="新密码，8-64位")
     is_active: bool | None = Field(default=None, description="是否启用")
     role: str | None = Field(default=None, pattern=r"^(user|admin)$", description="角色: user 或 admin")
+
+
+# ────────── 文档审查 ──────────
+class ReviewIssue(BaseModel):
+    """审查问题"""
+
+    type: str = Field(description="错误类型: ocr / semantic / text / structure / format")
+    severity: str = Field(description="严重程度: high / medium / low")
+    location: str = Field(description="错误位置（段落编号或章节引用）")
+    original: str = Field(description="原文")
+    suggested: str = Field(description="修正建议")
+    reason: str = Field(description="错误原因说明")
+
+
+class ReviewSummary(BaseModel):
+    """审查汇总"""
+
+    total_issues: int = Field(default=0)
+    ocr_errors: int = Field(default=0)
+    semantic_errors: int = Field(default=0)
+    text_errors: int = Field(default=0)
+    structure_issues: int = Field(default=0)
+    format_issues: int = Field(default=0)
+    overall_quality: str = Field(default="good", description="整体质量: good / fair / poor")
+    diff: dict | None = Field(default=None, description="增量对比统计（仅 quick_review 含此字段）")
+
+
+class ReviewResponse(BaseModel):
+    """审查结果响应"""
+
+    review_id: str = Field(description="审查记录 ID")
+    task_id: str = Field(description="任务 ID")
+    review_type: str = Field(description="审查类型: quick / deep")
+    status: str = Field(description="审查状态: pending / running / completed / failed")
+    progress: int = Field(default=0, description="进度百分比 (0-100)")
+    current_chunk: int = Field(default=0)
+    total_chunks: int = Field(default=0)
+    issues: list[ReviewIssue] = Field(default_factory=list)
+    summary: ReviewSummary | None = Field(default=None)
+    error_message: str | None = Field(default=None)
+    created_at: datetime | None = Field(default=None)
+    completed_at: datetime | None = Field(default=None)
+
+
+class TriggerDeepReviewResponse(BaseModel):
+    """触发深度审查响应"""
+
+    review_id: str = Field(description="审查记录 ID")
+    status: str = Field(description="审查状态")
+    message: str = Field(description="提示消息")

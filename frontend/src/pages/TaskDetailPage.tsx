@@ -39,9 +39,11 @@ import {
   SaveOutlined,
   HistoryOutlined,
   UploadOutlined,
+  SafetyOutlined,
+  AuditOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, getOriginalPdfPages, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory, getTaskContent, getTaskContentHtml, updateTaskContent } from '../services/api'
+import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, getOriginalPdfPages, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory, getTaskContent, getTaskContentHtml, updateTaskContent, getReview, triggerDeepReview, listReviews } from '../services/api'
 // 懒加载 DocEditor，避免 TinyMCE 影响首屏渲染
 const DocEditor = lazy(() => import('../components/DocEditor'))
 
@@ -86,6 +88,7 @@ const WORKFLOW_STEPS = [
   { key: 'extract_style', label: '提取排版样式' },
   { key: 'prepare_docx', label: '准备基础 DOCX' },
   { key: 'apply_style', label: '应用国标样式' },
+  { key: 'quick_review', label: '快速质量审查' },
 ]
 
 const markdownComponents = {
@@ -158,6 +161,45 @@ const TaskDetailPage: React.FC = () => {
   const [styleHistoryVisible, setStyleHistoryVisible] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
 
+  // 文档审查
+  interface ReviewIssue {
+    type: string
+    severity: string
+    location: string
+    original: string
+    suggested: string
+    reason: string
+  }
+  interface ReviewData {
+    review_id: string
+    review_type: string
+    status: string
+    progress: number
+    current_chunk: number
+    total_chunks: number
+    issues: ReviewIssue[]
+    summary: {
+      total_issues: number
+      ocr_errors: number
+      semantic_errors: number
+      text_errors: number
+      structure_issues: number
+      format_issues: number
+      overall_quality: string
+    } | null
+    error_message: string | null
+  }
+  const [quickReview, setQuickReview] = useState<ReviewData | null>(null)
+  const [deepReview, setDeepReview] = useState<ReviewData | null>(null)
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [deepReviewRunning, setDeepReviewRunning] = useState(false)
+  const [editorJumpText, setEditorJumpText] = useState<string | null>(null)
+
+  // 审查筛选/排序
+  const [issueFilterType, setIssueFilterType] = useState<string>('all')
+  const [issueFilterSeverity, setIssueFilterSeverity] = useState<string>('all')
+  const [issueSortKey, setIssueSortKey] = useState<string>('severity')
+
   // 内容编辑
   const [contentEditMode, setContentEditMode] = useState<'markdown' | 'richtext'>('markdown')
   const [editorHtml, setEditorHtml] = useState('')
@@ -181,6 +223,7 @@ const TaskDetailPage: React.FC = () => {
   const markdownScrollRef = useRef<any>(null)
   const tinyMceEditorRef = useRef<any>(null)
   const isSyncingRef = useRef(false)
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -215,6 +258,16 @@ const TaskDetailPage: React.FC = () => {
     return () => clearInterval(interval)
   }, [fetchTask, isTerminal])
 
+  // 清理深度审查轮询（组件卸载/切换时）
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
+      }
+    }
+  }, [])
+
   const fetchPreview = async () => {
     if (!taskId) return
     setPreviewLoading(true)
@@ -232,6 +285,305 @@ const TaskDetailPage: React.FC = () => {
     if (!taskId) return
     window.open(getDownloadUrl(taskId), '_blank')
   }
+
+  const fetchReview = useCallback(async (type?: string) => {
+    if (!taskId) return
+    setReviewLoading(true)
+    try {
+      if (type) {
+        // 获取指定类型的审查
+        const res = await getReview(taskId, type)
+        const data = res.data.data
+        if (data) {
+          if (data.review_type === 'quick') {
+            setQuickReview(data)
+          } else if (data.review_type === 'deep') {
+            setDeepReview(data)
+            setDeepReviewRunning(data.status === 'running')
+          }
+        }
+      } else {
+        // 获取所有审查记录并填充两个面板
+        const res = await listReviews(taskId)
+        const reviews: ReviewData[] = res.data.data?.reviews || []
+        let foundQuick = false
+        let foundDeep = false
+        for (const r of reviews) {
+          if (r.review_type === 'quick' && !foundQuick) {
+            setQuickReview(r)
+            foundQuick = true
+          } else if (r.review_type === 'deep' && !foundDeep) {
+            setDeepReview(r)
+            setDeepReviewRunning(r.status === 'running')
+            foundDeep = true
+          }
+          if (foundQuick && foundDeep) break
+        }
+      }
+    } catch {
+      // 静默处理
+    } finally {
+      setReviewLoading(false)
+    }
+  }, [taskId])
+
+  const handleDeepReview = async () => {
+    if (!taskId) return
+    // 清除之前的轮询
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current)
+      pollIntervalRef.current = null
+    }
+    setDeepReviewRunning(true)
+    try {
+      await triggerDeepReview(taskId)
+      message.success('深度审查已启动，请稍候...')
+      // 轮询等待审查完成
+      pollIntervalRef.current = setInterval(async () => {
+        try {
+          const res = await getReview(taskId, 'deep')
+          const data = res.data.data
+          if (data) {
+            setDeepReview(data)
+            if (data.status === 'completed' || data.status === 'failed') {
+              if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current)
+                pollIntervalRef.current = null
+              }
+              setDeepReviewRunning(false)
+              if (data.status === 'completed') {
+                message.success(`深度审查完成，发现 ${data.summary?.total_issues || 0} 个问题`)
+              } else {
+                message.error(data.error_message || '深度审查失败')
+              }
+            }
+          }
+        } catch {
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current)
+            pollIntervalRef.current = null
+          }
+          setDeepReviewRunning(false)
+        }
+      }, 3000)
+    } catch (err: any) {
+      message.error(err.message || '启动深度审查失败')
+      setDeepReviewRunning(false)
+    }
+  }
+
+  // ────────── 审查辅助常量和函数 ──────────
+
+  const issueTypeColors: Record<string, string> = {
+    ocr: 'orange',
+    semantic: 'red',
+    text: 'volcano',
+    structure: 'purple',
+    format: 'blue',
+  }
+  const issueTypeLabels: Record<string, string> = {
+    ocr: 'OCR错误',
+    semantic: '语义错误',
+    text: '文字错误',
+    structure: '结构问题',
+    format: '格式问题',
+  }
+  const severityColors: Record<string, string> = {
+    high: '#f5222d',
+    medium: '#fa8c16',
+    low: '#52c41a',
+  }
+  const severityLabels: Record<string, string> = {
+    high: '严重',
+    medium: '中等',
+    low: '轻微',
+  }
+  const severityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
+
+  const handleJumpToEditor = (location: string) => {
+    setActiveTab('content_editor')
+    sessionStorage.setItem('review_jump_location', location)
+
+    // 如果 TinyMCE 已经加载，直接定位；否则等 onInit 回调
+    const editor = tinyMceEditorRef.current
+    if (editor && editor.getBody) {
+      setTimeout(() => {
+        try {
+          const body = editor.getBody()
+          const text = body.innerText || body.textContent || ''
+          const searchTerms = location
+            .replace(/^第\d+段\s*[/]\s*/, '')
+            .replace(/条款|段落|章节/g, '')
+            .trim()
+          if (searchTerms) {
+            const idx = text.indexOf(searchTerms)
+            if (idx >= 0) {
+              const range = document.createRange()
+              const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT)
+              let charCount = 0
+              let targetNode: Node | null = null
+              let targetOffset = 0
+              while (walker.nextNode()) {
+                const node = walker.currentNode
+                const nodeLen = (node.textContent || '').length
+                if (charCount + nodeLen > idx) {
+                  targetNode = node
+                  targetOffset = idx - charCount
+                  break
+                }
+                charCount += nodeLen
+              }
+              if (targetNode) {
+                range.setStart(targetNode, Math.max(0, targetOffset))
+                range.collapse(true)
+                editor.selection.setRng(range)
+                editor.selection.scrollIntoView()
+              }
+            }
+          }
+        } catch { /* 定位失败静默 */ }
+        sessionStorage.removeItem('review_jump_location')
+      }, 200)
+    } else {
+      // 编辑器未加载，通过 prop 传递等待 onInit
+      setEditorJumpText(location)
+    }
+  }
+
+  const getFilteredSortedIssues = (issues: ReviewIssue[]) => {
+    let filtered = issues
+    if (issueFilterType !== 'all') {
+      filtered = filtered.filter(i => i.type === issueFilterType)
+    }
+    if (issueFilterSeverity !== 'all') {
+      filtered = filtered.filter(i => i.severity === issueFilterSeverity)
+    }
+    if (issueSortKey === 'severity') {
+      filtered = [...filtered].sort((a, b) => (severityOrder[a.severity] ?? 99) - (severityOrder[b.severity] ?? 99))
+    } else if (issueSortKey === 'type') {
+      filtered = [...filtered].sort((a, b) => a.type.localeCompare(b.type))
+    }
+    return filtered
+  }
+
+  const renderReviewContent = (review: ReviewData, title: string) => {
+    const filteredIssues = getFilteredSortedIssues(review.issues)
+    return (
+    <>
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={8}>
+          <Select
+            placeholder="筛选类型"
+            allowClear
+            style={{ width: '100%' }}
+            value={issueFilterType}
+            onChange={(v) => setIssueFilterType(v || 'all')}
+            options={[
+              { value: 'all', label: '全部类型' },
+              { value: 'ocr', label: 'OCR错误' },
+              { value: 'semantic', label: '语义错误' },
+              { value: 'text', label: '文字错误' },
+              { value: 'structure', label: '结构问题' },
+              { value: 'format', label: '格式问题' },
+            ]}
+          />
+        </Col>
+        <Col span={8}>
+          <Select
+            placeholder="筛选严重程度"
+            allowClear
+            style={{ width: '100%' }}
+            value={issueFilterSeverity}
+            onChange={(v) => setIssueFilterSeverity(v || 'all')}
+            options={[
+              { value: 'all', label: '全部严重程度' },
+              { value: 'high', label: '严重' },
+              { value: 'medium', label: '中等' },
+              { value: 'low', label: '轻微' },
+            ]}
+          />
+        </Col>
+        <Col span={8}>
+          <Select
+            placeholder="排序方式"
+            style={{ width: '100%' }}
+            value={issueSortKey}
+            onChange={(v) => setIssueSortKey(v)}
+            options={[
+              { value: 'severity', label: '按严重程度排序' },
+              { value: 'type', label: '按类型排序' },
+            ]}
+          />
+        </Col>
+      </Row>
+      <Alert
+        type={review.summary?.overall_quality === 'good' ? 'success' : review.summary?.overall_quality === 'poor' ? 'error' : 'warning'}
+        showIcon
+        style={{ marginBottom: 16 }}
+        message={`${title} — ${review.summary?.total_issues || 0} 个问题（筛选后: ${filteredIssues.length} 个）`}
+        description={
+          review.summary ? (
+            <Space wrap>
+              <Tag color="orange">OCR: {review.summary.ocr_errors}</Tag>
+              <Tag color="red">语义: {review.summary.semantic_errors}</Tag>
+              <Tag color="volcano">文字: {review.summary.text_errors}</Tag>
+              <Tag color="purple">结构: {review.summary.structure_issues}</Tag>
+              <Tag color="blue">格式: {review.summary.format_issues}</Tag>
+              <Tag>质量: {review.summary.overall_quality === 'good' ? '良好' : review.summary.overall_quality === 'fair' ? '一般' : '较差'}</Tag>
+            </Space>
+          ) : '暂无汇总'
+        }
+      />
+      {filteredIssues.length === 0 ? (
+        <Empty description={review.issues.length === 0 ? '未发现问题' : '无匹配结果'} />
+      ) : (
+        <List
+          dataSource={filteredIssues}
+          renderItem={(item: ReviewIssue, idx: number) => (
+            <List.Item
+              key={idx}
+              style={{ padding: '12px 0', cursor: 'pointer' }}
+              onClick={() => handleJumpToEditor(item.location)}
+            >
+              <div style={{ width: '100%' }}>
+                <Space style={{ marginBottom: 8 }}>
+                  <Tag color={issueTypeColors[item.type] || 'default'}>
+                    {issueTypeLabels[item.type] || item.type}
+                  </Tag>
+                  <Tag color={severityColors[item.severity]} style={{ color: '#fff' }}>
+                    {severityLabels[item.severity] || item.severity}
+                  </Tag>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {item.location}
+                  </Typography.Text>
+                  <Typography.Link style={{ fontSize: 12 }}>
+                    点击跳转编辑 →
+                  </Typography.Link>
+                </Space>
+                <div style={{ background: '#fafafa', padding: 12, borderRadius: 6, marginBottom: 8 }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>原文：</Typography.Text>
+                  <Typography.Text style={{ background: '#fff2f0', padding: '2px 6px', borderRadius: 3 }}>
+                    {item.original}
+                  </Typography.Text>
+                </div>
+                {item.suggested && (
+                  <div style={{ background: '#f6ffed', padding: 12, borderRadius: 6, marginBottom: 8 }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>建议：</Typography.Text>
+                    <Typography.Text style={{ background: '#d9f7be', padding: '2px 6px', borderRadius: 3 }}>
+                      {item.suggested}
+                    </Typography.Text>
+                  </div>
+                )}
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  原因：{item.reason}
+                </Typography.Text>
+              </div>
+            </List.Item>
+          )}
+        />
+      )}
+    </>
+  )}
 
   const handleMineruDocxDownload = () => {
     if (!taskId) return
@@ -513,6 +865,9 @@ const TaskDetailPage: React.FC = () => {
     if (activeTab === 'markdown' && !preview) {
       fetchPreview()
     }
+    if (activeTab === 'review' && !quickReview && !deepReview) {
+      fetchReview()
+    }
   }, [activeTab, taskId, task?.status])
 
   if (loading) {
@@ -694,6 +1049,83 @@ const TaskDetailPage: React.FC = () => {
       ),
     })
 
+    // 文档审查 Tab
+
+    tabItems.push({
+      key: 'review',
+      label: <span><SafetyOutlined /> 文档审查</span>,
+      children: (
+        <Spin spinning={reviewLoading}>
+          <Card>
+            {/* 深度审查按钮 */}
+            <div style={{ textAlign: 'center', marginBottom: 24 }}>
+              <Space>
+                <Button
+                  icon={<AuditOutlined />}
+                  type="primary"
+                  onClick={handleDeepReview}
+                  loading={deepReviewRunning}
+                  disabled={deepReviewRunning}
+                >
+                  {deepReviewRunning ? '深度审查中...' : '启动深度审查 (LLM)'}
+                </Button>
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={() => fetchReview()}
+                >
+                  刷新结果
+                </Button>
+              </Space>
+              {deepReviewRunning && deepReview && (
+                <div style={{ marginTop: 12 }}>
+                  <Progress
+                    percent={deepReview.progress}
+                    format={() => `第 ${deepReview.current_chunk}/${deepReview.total_chunks} 块`}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* 快速审查结果 */}
+            {quickReview && quickReview.status === 'completed' ? (
+              <Collapse
+                defaultActiveKey={['quick']}
+                items={[
+                  {
+                    key: 'quick',
+                    label: <span><ThunderboltOutlined /> 快速审查（自动）</span>,
+                    children: renderReviewContent(quickReview, '快速审查'),
+                  },
+                ]}
+              />
+            ) : (
+              <Empty description="快速审查结果将在排版完成后自动生成" />
+            )}
+
+            {/* 深度审查结果 */}
+            {deepReview && deepReview.status === 'completed' && (
+              <Collapse
+                style={{ marginTop: 16 }}
+                defaultActiveKey={['deep']}
+                items={[
+                  {
+                    key: 'deep',
+                    label: <span><AuditOutlined /> 深度审查 (LLM)</span>,
+                    children: renderReviewContent(deepReview, '深度审查'),
+                  },
+                ]}
+              />
+            )}
+
+            {/* 无结果 */}
+            {(!quickReview || quickReview.status !== 'completed') && (!deepReview || deepReview.status !== 'completed') && (
+              <Empty description="暂无审查结果" />
+            )}
+          </Card>
+        </Spin>
+      ),
+    })
+
     // 内容编辑 Tab（左右分栏：左侧 PDF 对比预览 + 右侧编辑区）
     tabItems.push({
       key: 'content_editor',
@@ -855,8 +1287,11 @@ const TaskDetailPage: React.FC = () => {
                     <DocEditor
                       initialHtml={editorHtml}
                       onChange={setEditorHtml}
+                      jumpToText={editorJumpText}
                       onEditorInit={(editor) => {
                         tinyMceEditorRef.current = editor
+                        // 清除跳转标记（一次生效）
+                        if (editorJumpText) setEditorJumpText(null)
                         // 监听 TinyMCE iframe 内部滚动
                         const iframe = editor.iframeElement
                         if (iframe && iframe.contentWindow) {

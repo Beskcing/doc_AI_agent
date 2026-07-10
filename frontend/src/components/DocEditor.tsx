@@ -18,13 +18,15 @@ interface DocEditorProps {
   disabled?: boolean
   /** 编辑器初始化完成回调，返回 editor 实例 */
   onEditorInit?: (editor: any) => void
+  /** 编辑器加载后跳转到指定文本位置（如"第3段 / 3.1 条款"） */
+  jumpToText?: string | null
 }
 
 /**
  * DOC 富文本编辑器组件
  * 提供 Word 风格的所见即所得编辑体验
  */
-export default function DocEditor({ initialHtml, onChange, disabled, onEditorInit }: DocEditorProps) {
+export default function DocEditor({ initialHtml, onChange, disabled, onEditorInit, jumpToText }: DocEditorProps) {
   const editorRef = useRef<any>(null)
 
   const handleEditorChange = (content: string) => {
@@ -39,6 +41,51 @@ export default function DocEditor({ initialHtml, onChange, disabled, onEditorIni
       onInit={(_evt, editor) => {
         editorRef.current = editor
         onEditorInit?.(editor)
+        // 审查面板跳转：定位到指定文本位置
+        if (jumpToText) {
+          setTimeout(() => {
+            try {
+              const body = editor.getBody()
+              const text = body.innerText || body.textContent || ''
+              // 尝试在编辑器内容中搜索 location 描述的关键词
+              const searchTerms = jumpToText
+                .replace(/^第\d+段\s*[/]\s*/, '')  // 去掉"第N段 / "前缀
+                .replace(/条款|段落|章节/g, '')
+                .trim()
+              if (searchTerms) {
+                const idx = text.indexOf(searchTerms)
+                if (idx >= 0) {
+                  // 找到了匹配文本，滚动到对应位置
+                  const range = document.createRange()
+                  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT)
+                  let charCount = 0
+                  let targetNode: Node | null = null
+                  let targetOffset = 0
+                  while (walker.nextNode()) {
+                    const node = walker.currentNode
+                    const nodeLen = (node.textContent || '').length
+                    if (charCount + nodeLen > idx) {
+                      targetNode = node
+                      targetOffset = idx - charCount
+                      break
+                    }
+                    charCount += nodeLen
+                  }
+                  if (targetNode) {
+                    range.setStart(targetNode, Math.max(0, targetOffset))
+                    range.collapse(true)
+                    editor.selection.setRng(range)
+                    editor.selection.scrollIntoView()
+                  }
+                }
+              }
+            } catch {
+              // 定位失败静默处理
+            }
+            // 清除已使用的跳转标记
+            sessionStorage.removeItem('review_jump_location')
+          }, 500)  // 延迟等待编辑器完全渲染
+        }
       }}
       onEditorChange={handleEditorChange}
       disabled={disabled}

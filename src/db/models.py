@@ -183,3 +183,29 @@ class UserModel(Base):
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username={self.username}, role={self.role})>"
+
+
+class TaskReviewModel(Base):
+    """任务审查结果表
+
+    保存排版后文档的审查结果，支持快速审查（规则）和深度审查（LLM）两种模式。
+    issues 存储为 JSON 数组，每个 issue 包含类型/位置/原文/建议/严重程度。
+    """
+
+    __tablename__ = "task_reviews"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    task_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    review_type: Mapped[str] = mapped_column(String(20), nullable=False, default="quick")  # quick / deep
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending / running / completed / failed
+    issues: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"issues": [...], "summary": {...}}
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    current_chunk: Mapped[int] = mapped_column(Integer, default=0)
+    total_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<TaskReview(id={self.id}, task={self.task_id}, type={self.review_type}, status={self.status})>"

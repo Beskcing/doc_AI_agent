@@ -249,6 +249,30 @@ class PipelineService:
         if not self.deps.config.debug.keep_intermediate_files:
             self._cleanup_intermediates(task_id)
 
+        # ── 阶段 6: 快速审查 ──
+        self._update_status(task_id, "processing", progress=95, current_step="quick_review")
+        try:
+            from src.api.services.docx_review_service import DocxReviewService
+
+            review_config = self.deps.config
+            review_prompt = ""
+            try:
+                prompt_path = Path(review_config.paths.prompts_dir) / "docx_review_prompt.md"
+                if prompt_path.exists():
+                    review_prompt = prompt_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+            review_service = DocxReviewService(
+                config=review_config,
+                get_llm_client=self.deps.get_llm_client,
+                review_prompt_template=review_prompt,
+            )
+            review_service.quick_review(task_id)
+            logger.info("任务 %s: 快速审查完成", task_id)
+        except Exception as e:
+            logger.warning("任务 %s: 快速审查失败（不影响主流程）: %s", task_id, e)
+
         return cleaned_markdown, styled_path, mineru_docx_path, style_config
 
     def _parse_input(self, task_id: str, file_path: str) -> tuple[str, str, str | None]:

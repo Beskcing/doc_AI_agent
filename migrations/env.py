@@ -30,6 +30,7 @@ from src.db.models import (  # noqa: F401 — ensure models are imported for aut
     StyleTemplateModel,
     SystemConfigModel,
     TaskModel,
+    TaskReviewModel,
     UserModel,
 )
 

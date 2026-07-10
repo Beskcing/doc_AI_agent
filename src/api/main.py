@@ -23,6 +23,7 @@ from src.api.routers import (
     config_router,
     formatters_router,
     kb_router,
+    review_router,
     tasks_router,
     templates_router,
     upload_router,
@@ -106,6 +107,7 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(upload_router)
 app.include_router(tasks_router)
+app.include_router(review_router)
 app.include_router(kb_router)
 app.include_router(config_router)
 app.include_router(templates_router)

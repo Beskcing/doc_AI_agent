@@ -17,6 +17,7 @@ from src.db.models import (
     StyleTemplateModel,
     SystemConfigModel,
     TaskModel,
+    TaskReviewModel,
     UserModel,
 )
 
@@ -541,3 +542,115 @@ class UserCRUD:
         db.delete(user)
         db.commit()
         return True
+
+
+class TaskReviewCRUD:
+    """任务审查结果 CRUD"""
+
+    @staticmethod
+    def create(db: Session, **kwargs) -> TaskReviewModel:
+        review = TaskReviewModel(**kwargs)
+        db.add(review)
+        db.commit()
+        db.refresh(review)
+        return review
+
+    @staticmethod
+    def get(db: Session, review_id: str) -> TaskReviewModel | None:
+        return db.query(TaskReviewModel).filter(TaskReviewModel.id == review_id).first()
+
+    @staticmethod
+    def get_by_task(db: Session, task_id: str, review_type: str | None = None) -> TaskReviewModel | None:
+        """获取任务的最新审查结果
+
+        Args:
+            db: 数据库会话
+            task_id: 任务 ID
+            review_type: 可选，筛选审查类型 (quick/deep)
+
+        Returns:
+            最新的审查结果，或 None
+        """
+        query = db.query(TaskReviewModel).filter(TaskReviewModel.task_id == task_id)
+        if review_type:
+            query = query.filter(TaskReviewModel.review_type == review_type)
+        return query.order_by(TaskReviewModel.created_at.desc()).first()
+
+    @staticmethod
+    def list_by_task(db: Session, task_id: str) -> list[TaskReviewModel]:
+        """获取任务的所有审查结果"""
+        return (
+            db.query(TaskReviewModel)
+            .filter(TaskReviewModel.task_id == task_id)
+            .order_by(TaskReviewModel.created_at.desc())
+            .all()
+        )
+
+    @staticmethod
+    def update_issues(
+        db: Session,
+        review_id: str,
+        issues: dict,
+        status: str = "completed",
+    ) -> TaskReviewModel | None:
+        """更新审查结果"""
+        review = db.query(TaskReviewModel).filter(TaskReviewModel.id == review_id).first()
+        if not review:
+            return None
+        review.issues = issues
+        review.status = status
+        if status == "completed":
+            review.completed_at = datetime.now()
+        db.commit()
+        db.refresh(review)
+        return review
+
+    @staticmethod
+    def update_progress(
+        db: Session,
+        review_id: str,
+        progress: int,
+        current_chunk: int | None = None,
+        total_chunks: int | None = None,
+    ) -> TaskReviewModel | None:
+        """更新审查进度"""
+        review = db.query(TaskReviewModel).filter(TaskReviewModel.id == review_id).first()
+        if not review:
+            return None
+        review.progress = progress
+        if current_chunk is not None:
+            review.current_chunk = current_chunk
+        if total_chunks is not None:
+            review.total_chunks = total_chunks
+        db.commit()
+        db.refresh(review)
+        return review
+
+    @staticmethod
+    def mark_failed(db: Session, review_id: str, error_message: str) -> TaskReviewModel | None:
+        """标记审查失败"""
+        review = db.query(TaskReviewModel).filter(TaskReviewModel.id == review_id).first()
+        if not review:
+            return None
+        review.status = "failed"
+        review.error_message = error_message
+        review.completed_at = datetime.now()
+        db.commit()
+        db.refresh(review)
+        return review
+
+    @staticmethod
+    def delete(db: Session, review_id: str) -> bool:
+        review = db.query(TaskReviewModel).filter(TaskReviewModel.id == review_id).first()
+        if review:
+            db.delete(review)
+            db.commit()
+            return True
+        return False
+
+    @staticmethod
+    def delete_by_task(db: Session, task_id: str) -> int:
+        """删除任务的所有审查记录"""
+        count = db.query(TaskReviewModel).filter(TaskReviewModel.task_id == task_id).delete()
+        db.commit()
+        return count

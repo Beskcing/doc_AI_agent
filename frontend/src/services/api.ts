@@ -336,3 +336,13 @@ export const login = (data: { username: string; password: string }) =>
 
 export const getMe = () =>
   api.get('/api/auth/me')
+
+// ────────── 文档审查 ──────────
+export const getReview = (taskId: string, reviewType?: string) =>
+  api.get(`/api/tasks/${taskId}/review`, { params: reviewType ? { review_type: reviewType } : {} })
+
+export const triggerDeepReview = (taskId: string) =>
+  api.post(`/api/tasks/${taskId}/review/deep`)
+
+export const listReviews = (taskId: string) =>
+  api.get(`/api/tasks/${taskId}/reviews`)
