@@ -26,6 +26,7 @@ import {
   BellOutlined,
   MessageOutlined,
   FileExcelOutlined,
+  TeamOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { getTaskStats } from '../services/api'
@@ -112,6 +113,7 @@ const AppLayout: React.FC = () => {
         ? [
             { key: '/kb', icon: <DatabaseOutlined />, label: '知识库' },
             { key: '/config', icon: <SettingOutlined />, label: '系统配置' },
+            { key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' },
           ]
         : []),
     ]

@@ -10,6 +10,7 @@ import KbPage from './pages/KbPage'
 import ConfigPage from './pages/ConfigPage'
 import TemplatesPage from './pages/TemplatesPage'
 import LoginPage from './pages/LoginPage'
+import AdminUsersPage from './pages/AdminUsersPage'
 
 function App() {
   return (
@@ -33,6 +34,7 @@ function App() {
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="kb" element={<KbPage />} />
         <Route path="config" element={<ConfigPage />} />
+        <Route path="admin/users" element={<AdminUsersPage />} />
       </Route>
     </Routes>
   )

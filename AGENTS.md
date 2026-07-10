@@ -60,6 +60,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-10 | feat | 管理员用户管理前端页面: AdminUsersPage(表格+创建/编辑弹窗+删除+启用禁用) + api.ts 4个管理API + App路由/admin/users + AppLayout菜单集成 |
 | 2026-07-10 | fix | Docker Alembic迁移修复: env.py通过DATABASE_URL环境变量覆盖alembic.ini硬编码SQLite, 容器内alembic正确连接PostgreSQL |
 | 2026-07-10 | fix | Docker部署依赖补全: pyproject.toml添加psycopg2-binary/celery/redis/bcrypt |
 | 2026-07-10 | fix | quick_review Unicode检测正扩充合法字符范围(拉丁/希腊/数学符号等), 消除技术文档100%误报 |

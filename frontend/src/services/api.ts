@@ -346,3 +346,16 @@ export const triggerDeepReview = (taskId: string) =>
 
 export const listReviews = (taskId: string) =>
   api.get(`/api/tasks/${taskId}/reviews`)
+
+// ────────── 管理员用户管理 ──────────
+export const listUsers = (params: { page?: number; page_size?: number }) =>
+  api.get('/api/admin/users', { params })
+
+export const createUser = (data: { username: string; password: string; role: string }) =>
+  api.post('/api/admin/users', data)
+
+export const updateUser = (userId: string, data: { password?: string; is_active?: boolean; role?: string }) =>
+  api.put(`/api/admin/users/${userId}`, data)
+
+export const deleteUser = (userId: string) =>
+  api.delete(`/api/admin/users/${userId}`)
