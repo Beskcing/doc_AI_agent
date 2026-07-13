@@ -837,7 +837,7 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
             issue_indices: 指定修正的索引列表，为空则全部
 
         Returns:
-            dict: {fixed, failed, details}
+            dict: {fixed, failed, pending, details}
         """
         logger.info(
             "任务 %s: 批量修正 (auto_low=%s, indices=%s)",
