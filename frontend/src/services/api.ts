@@ -347,6 +347,26 @@ export const triggerDeepReview = (taskId: string) =>
 export const listReviews = (taskId: string) =>
   api.get(`/api/tasks/${taskId}/reviews`)
 
+// 生成标记版 DOCX
+export const markDocx = (taskId: string) =>
+  api.post(`/api/tasks/${taskId}/review/mark`)
+
+// 获取标记版 DOCX 下载 URL（前端 fetch 携带 JWT）
+export const getMarkedDocxDownloadUrl = (taskId: string) =>
+  `${API_BASE}/api/tasks/${taskId}/review/marked-docx`
+
+// 获取标记版 HTML 预览
+export const getMarkedPreview = (taskId: string) =>
+  api.get(`/api/tasks/${taskId}/review/marked-preview`)
+
+// 单条修正
+export const fixSingleIssue = (taskId: string, issueIndex: number, fixText?: string, mode: string = 'ai') =>
+  api.post(`/api/tasks/${taskId}/review/fix`, { issue_index: issueIndex, fix_text: fixText, mode })
+
+// 批量修正
+export const batchFixIssues = (taskId: string, autoFixLow: boolean = true, issueIndices?: number[]) =>
+  api.post(`/api/tasks/${taskId}/review/fix-batch`, { auto_fix_low: autoFixLow, issue_indices: issueIndices })
+
 // ────────── 管理员用户管理 ──────────
 export const listUsers = (params: { page?: number; page_size?: number }) =>
   api.get('/api/admin/users', { params })

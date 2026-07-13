@@ -60,6 +60,8 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-13 | feat | 审查标记与AI修正: DocxReviewMarker(DOCX黄色高亮+Word批注), HTML标记预览API, 标记版DOCX下载, 单条/批量AI修正API, 前端审查标记Tab(左侧HTML预览+右侧问题列表+AI修正按钮+一键批量修正) |
+| 2026-07-12 | feat | 深度审查新增LaTeX公式残留审查维度: _QUICK_CHECK_PATTERNS添加50+个LaTeX命令正则(含$$/$分隔符/常用命令/希腊字母/环境/字体/运算符/修饰符), _build_summary新增latex_residue统计字段, 表格内LaTeX也能被审查覆盖 |
 | 2026-07-10 | fix | TinyMCE编辑器无法加载: main.py新增/tinymce静态文件挂载, 修复SPA fallback拦截导致返回index.html而非JS的问题 |
 | 2026-07-10 | fix | DOCX下载失败(401): TaskDetailPage下载改用fetch+Blob携带JWT token, 替换window.open(不会带Authorization头) |
 | 2026-07-10 | feat | 管理员用户管理前端页面: AdminUsersPage(表格+创建/编辑弹窗+删除+启用禁用) + api.ts 4个管理API + App路由/admin/users + AppLayout菜单集成 |

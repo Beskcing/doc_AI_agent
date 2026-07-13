@@ -470,3 +470,47 @@ class TriggerDeepReviewResponse(BaseModel):
     review_id: str = Field(description="审查记录 ID")
     status: str = Field(description="审查状态")
     message: str = Field(description="提示消息")
+
+
+# ────────── 审查标记与修正 ──────────
+
+
+class MarkDocxResponse(BaseModel):
+    """标记版 DOCX 生成响应"""
+
+    marked_docx_path: str = Field(description="标记版 DOCX 路径")
+    total_issues: int = Field(default=0)
+    highlighted: int = Field(default=0)
+    commented: int = Field(default=0)
+    errors: int = Field(default=0)
+
+
+class MarkedPreviewResponse(BaseModel):
+    """标记版 HTML 预览响应"""
+
+    html: str = Field(description="预览 HTML 内容")
+    issues: list[ReviewIssue] = Field(default_factory=list, description="审查 issues 列表")
+    summary: ReviewSummary | None = Field(default=None, description="审查汇总")
+
+
+class FixIssueRequest(BaseModel):
+    """单条修正请求"""
+
+    issue_index: int = Field(ge=0, description="issues 列表索引")
+    fix_text: str | None = Field(default=None, description="手动修正文本（mode=manual 时必填）")
+    mode: str = Field(default="ai", pattern=r"^(ai|manual)$", description="修正模式: ai / manual")
+
+
+class BatchFixRequest(BaseModel):
+    """批量修正请求"""
+
+    auto_fix_low: bool = Field(default=True, description="是否自动修正 low 级别 issues")
+    issue_indices: list[int] | None = Field(default=None, description="指定修正的 issue 索引列表（为空则全部）")
+
+
+class FixIssueResponse(BaseModel):
+    """修正响应"""
+
+    fixed: int = Field(default=0, description="已修正数量")
+    failed: int = Field(default=0, description="失败数量")
+    details: list[dict] = Field(default_factory=list, description="每条修正的详情")

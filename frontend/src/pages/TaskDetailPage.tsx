@@ -43,7 +43,7 @@ import {
   AuditOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, getOriginalPdfPages, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory, getTaskContent, getTaskContentHtml, updateTaskContent, getReview, triggerDeepReview, listReviews } from '../services/api'
+import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, getOriginalPdfPages, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory, getTaskContent, getTaskContentHtml, updateTaskContent, getReview, triggerDeepReview, listReviews, getMarkedPreview, getMarkedDocxDownloadUrl, fixSingleIssue, batchFixIssues } from '../services/api'
 // 懒加载 DocEditor，避免 TinyMCE 影响首屏渲染
 const DocEditor = lazy(() => import('../components/DocEditor'))
 
@@ -169,6 +169,7 @@ const TaskDetailPage: React.FC = () => {
     original: string
     suggested: string
     reason: string
+    _fixed?: boolean
   }
   interface ReviewData {
     review_id: string
@@ -193,6 +194,10 @@ const TaskDetailPage: React.FC = () => {
   const [deepReview, setDeepReview] = useState<ReviewData | null>(null)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [deepReviewRunning, setDeepReviewRunning] = useState(false)
+  const [markedPreview, setMarkedPreview] = useState<{ html: string; issues: ReviewIssue[]; summary: any } | null>(null)
+  const [markedPreviewLoading, setMarkedPreviewLoading] = useState(false)
+  const [fixLoading, setFixLoading] = useState<number | null>(null)
+  const [batchFixLoading, setBatchFixLoading] = useState(false)
   const [editorJumpText, setEditorJumpText] = useState<string | null>(null)
 
   // 审查筛选/排序
@@ -399,6 +404,69 @@ const TaskDetailPage: React.FC = () => {
     } catch (err: any) {
       message.error(err.message || '启动深度审查失败')
       setDeepReviewRunning(false)
+    }
+  }
+
+
+  // 加载标记版 HTML 预览
+  const handleLoadMarkedPreview = async () => {
+    if (!taskId) return
+    setMarkedPreviewLoading(true)
+    try {
+      const res = await getMarkedPreview(taskId)
+      if (res.data.data) {
+        setMarkedPreview(res.data.data)
+      } else {
+        message.warning('暂无审查结果，请先完成排版')
+      }
+    } catch (err: any) {
+      message.error(err.message || '加载标记预览失败')
+    } finally {
+      setMarkedPreviewLoading(false)
+    }
+  }
+
+  // 下载标记版 DOCX
+  const handleDownloadMarkedDocx = () => {
+    if (!taskId) return
+    downloadWithAuth(getMarkedDocxDownloadUrl(taskId), task?.filename?.replace(/\.pdf$/i, '') + '_审查标记.docx' || 'review_marked.docx')
+  }
+
+  // 单条 AI 修正
+  const handleFixSingle = async (issueIndex: number) => {
+    if (!taskId) return
+    setFixLoading(issueIndex)
+    try {
+      const res = await fixSingleIssue(taskId, issueIndex, undefined, 'ai')
+      if (res.data.data?.success) {
+        message.success('修正成功')
+        // 刷新标记预览
+        handleLoadMarkedPreview()
+      } else {
+        message.error(res.data.data?.error || '修正失败')
+      }
+    } catch (err: any) {
+      message.error(err.message || '修正失败')
+    } finally {
+      setFixLoading(null)
+    }
+  }
+
+  // 批量修正 (low 级别)
+  const handleBatchFix = async () => {
+    if (!taskId) return
+    setBatchFixLoading(true)
+    try {
+      const res = await batchFixIssues(taskId, true)
+      const data = res.data.data
+      if (data) {
+        message.success(`批量修正完成: ${data.fixed} 成功, ${data.failed} 失败`)
+        handleLoadMarkedPreview()
+      }
+    } catch (err: any) {
+      message.error(err.message || '批量修正失败')
+    } finally {
+      setBatchFixLoading(false)
     }
   }
 
@@ -1156,7 +1224,103 @@ const TaskDetailPage: React.FC = () => {
       ),
     })
 
-    // 内容编辑 Tab（左右分栏：左侧 PDF 对比预览 + 右侧编辑区）
+    
+            {/* 审查标记预览与修正 */}
+            {(quickReview || deepReview) && (quickReview?.issues && quickReview.issues.length > 0 || deepReview?.issues && deepReview.issues.length > 0) && (
+              <Card title="审查标记预览与修正" style={{ marginTop: 16 }}>
+                <Space style={{ marginBottom: 16 }}>
+                  <Button
+                    type="primary"
+                    icon={<EyeOutlined />}
+                    onClick={handleLoadMarkedPreview}
+                    loading={markedPreviewLoading}
+                  >
+                    加载标记预览
+                  </Button>
+                  <Button
+                    icon={<DownloadOutlined />}
+                    onClick={handleDownloadMarkedDocx}
+                  >
+                    下载标记版 DOCX
+                  </Button>
+                  <Button
+                    icon={<ThunderboltOutlined />}
+                    onClick={handleBatchFix}
+                    loading={batchFixLoading}
+                    disabled={batchFixLoading}
+                  >
+                    一键批量修正 (Low)
+                  </Button>
+                </Space>
+
+                {markedPreview ? (
+                  <Row gutter={16}>
+                    <Col span={14}>
+                      <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, height: 'calc(100vh - 400px)', minHeight: 400 }}>
+                        <iframe
+                          srcDoc={markedPreview.html}
+                          style={{ width: '100%', height: '100%', border: 'none' }}
+                          title="审查标记预览"
+                        />
+                      </div>
+                    </Col>
+                    <Col span={10}>
+                      <List
+                        dataSource={(markedPreview.issues || []).filter(i => !i._fixed)}
+                        style={{ maxHeight: 'calc(100vh - 450px)', overflow: 'auto' }}
+                        renderItem={(item: ReviewIssue, idx: number) => (
+                          <List.Item
+                            key={idx}
+                            style={{ padding: '8px 0' }}
+                            actions={[
+                              <Button
+                                size="small"
+                                type="link"
+                                icon={<ThunderboltOutlined />}
+                                onClick={() => handleFixSingle(idx)}
+                                loading={fixLoading === idx}
+                                disabled={fixLoading !== null}
+                              >
+                                AI修正
+                              </Button>,
+                            ]}
+                          >
+                            <div style={{ width: '100%' }}>
+                              <Space size={4}>
+                                <Tag color={issueTypeColors[item.type] || 'default'}>
+                                  {issueTypeLabels[item.type] || item.type}
+                                </Tag>
+                                <Tag color={severityColors[item.severity]}>
+                                  {severityLabels[item.severity] || item.severity}
+                                </Tag>
+                                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                                  {item.location}
+                                </Typography.Text>
+                              </Space>
+                              <div style={{ marginTop: 4, fontSize: 12, color: '#666' }}>
+                                <span style={{ background: '#fff2f0', padding: '1px 4px', borderRadius: 2 }}>
+                                  {item.original?.substring(0, 60)}
+                                </span>
+                                {item.original?.length > 60 && '...'}
+                              </div>
+                              {item.suggested && (
+                                <div style={{ marginTop: 2, fontSize: 12, color: '#52c41a' }}>
+                                  {'→'} {item.suggested?.substring(0, 60)}
+                                </div>
+                              )}
+                            </div>
+                          </List.Item>
+                        )}
+                      />
+                    </Col>
+                  </Row>
+                ) : (
+                  <Empty description="点击「加载标记预览」查看审查标记" />
+                )}
+              </Card>
+            )}
+
+// 内容编辑 Tab（左右分栏：左侧 PDF 对比预览 + 右侧编辑区）
     tabItems.push({
       key: 'content_editor',
       label: <span><EditOutlined /> 内容编辑</span>,

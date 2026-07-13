@@ -40,6 +40,20 @@ _QUICK_CHECK_PATTERNS: list[tuple[str, str, str, str]] = [
     ),
     (r"\b[01OIlZSB]{2,}\b", "ocr", "疑似数字/字母混淆", "检查是否为 0/O、1/l/I 混淆"),
     (r"([\u4e00-\u9fff])([A-Za-z0-9])", "format", "中文与英文/数字间缺少空格", "建议在中文与英文/数字之间添加空格"),
+    (
+        r"\$(?:\$|[^$]*\$)"  # $$...$$ 或 $...$ 分隔符残留
+        r"|\\left|\\right|\\frac|\\sqrt|\\sum|\\int|\\prod|\\lim"
+        r"|\\alpha|\\beta|\\gamma|\\delta|\\epsilon|\\lambda|\\mu|\\sigma|\\omega"
+        r"|\\begin|\\end"
+        r"|\\text|\\mathrm|\\mathbf|\\mathit"
+        r"|\\pm|\\cdot|\\times|\\div|\\leq|\\geq|\\neq|\\approx|\\infty"
+        r"|\\partial|\\nabla|\\forall|\\exists|\\in|\\subset|\\cup|\\cap"
+        r"|\\rightarrow|\\Rightarrow|\\langle|\\rangle"
+        r"|\\overline|\\underline|\\hat|\\tilde|\\bar|\\dot|\\vec",
+        "latex",
+        "残留 LaTeX 公式语法",
+        "检查 MinerU 转换是否丢失公式，考虑手动修复或改用图片替代",
+    ),
 ]
 
 
@@ -312,7 +326,7 @@ class DocxReviewService:
                 issues.append(
                     {
                         "type": issue_type,
-                        "severity": "low",
+                        "severity": "medium" if issue_type == "latex" else "low",
                         "location": f"第{para_idx + 1}段",
                         "original": match.group(0),
                         "suggested": suggestion,
@@ -418,6 +432,7 @@ class DocxReviewService:
         text = sum(1 for i in issues if i.get("type") == "text")
         structure = sum(1 for i in issues if i.get("type") == "structure")
         fmt = sum(1 for i in issues if i.get("type") == "format")
+        latex = sum(1 for i in issues if i.get("type") == "latex")
         total = len(issues)
 
         if total == 0:
@@ -438,6 +453,7 @@ class DocxReviewService:
             "text_errors": text,
             "structure_issues": structure,
             "format_issues": fmt,
+            "latex_residue": latex,
             "overall_quality": quality,
         }
 
@@ -452,3 +468,541 @@ class DocxReviewService:
                 seen.add(key)
                 unique.append(issue)
         return unique
+
+    # ==================== 标记 DOCX 生成 ====================
+
+    def generate_marked_docx(self, task_id: str) -> dict | None:
+        """生成标记版 DOCX（黄色高亮 + 批注）
+
+        Returns:
+            dict: {marked_docx_path, total_issues, highlighted, commented, errors}
+            None: 失败
+        """
+        logger.info("任务 %s: 生成标记版 DOCX", task_id)
+
+        try:
+            # 获取任务信息
+            with get_db_session() as db:
+                task = TaskCRUD.get(db, task_id)
+                if not task or not task.result_path:
+                    return None
+                docx_path = task.result_path
+
+            if not docx_path or not Path(docx_path).exists():
+                logger.warning("任务 %s: DOCX 不存在", task_id)
+                return None
+
+            # 获取审查 issues
+            issues = self._get_review_issues(task_id)
+            if not issues:
+                logger.info("任务 %s: 无审查 issues，跳过标记", task_id)
+                return {
+                    "marked_docx_path": docx_path,
+                    "total_issues": 0,
+                    "highlighted": 0,
+                    "commented": 0,
+                    "errors": 0,
+                }
+
+            # 生成标记版
+            from src.tools.docx_review_marker import DocxReviewMarker
+
+            output_dir = Path(docx_path).parent
+            marked_path = output_dir / "review_marked.docx"
+
+            marker = DocxReviewMarker()
+            stats = marker.mark_issues(docx_path, issues, str(marked_path))
+            stats["marked_docx_path"] = str(marked_path)
+
+            logger.info(
+                "任务 %s: 标记版 DOCX 已生成 → %s (%s)",
+                task_id,
+                marked_path.name,
+                stats,
+            )
+            return stats
+
+        except Exception as e:
+            logger.error("任务 %s: 生成标记版 DOCX 失败: %s", task_id, e)
+            return None
+
+    # ==================== HTML 预览 ====================
+
+    def generate_marked_html(self, task_id: str) -> dict | None:
+        """生成标记版 HTML 预览
+
+        Returns:
+            dict: {html, issues, summary}
+            None: 失败
+        """
+        logger.info("任务 %s: 生成标记版 HTML 预览", task_id)
+
+        try:
+            # 获取任务信息
+            with get_db_session() as db:
+                task = TaskCRUD.get(db, task_id)
+                if not task or not task.result_path:
+                    return None
+                docx_path = task.result_path
+
+            if not docx_path or not Path(docx_path).exists():
+                return None
+
+            # 获取审查 issues
+            issues = self._get_review_issues(task_id)
+            summary = self._build_summary(issues)
+
+            # 提取 DOCX 文本
+            docx_text: DocxText = self._extractor.extract(docx_path)
+
+            # 构建带标记的 HTML
+            html = self._build_marked_html(docx_text, issues)
+
+            return {"html": html, "issues": issues, "summary": summary}
+
+        except Exception as e:
+            logger.error("任务 %s: 生成 HTML 预览失败: %s", task_id, e)
+            return None
+
+    def _build_marked_html(self, docx_text: DocxText, issues: list[dict]) -> str:
+        """构建带标记的 HTML 内容"""
+        # 按段落索引建立 issues 索引
+        issues_by_para: dict[int, list[dict]] = {}
+        for i, issue in enumerate(issues):
+            location = issue.get("location", "")
+            para_idx = self._parse_location_index(location)
+            if para_idx >= 0:
+                if para_idx not in issues_by_para:
+                    issues_by_para[para_idx] = []
+                issues_by_para[para_idx].append({**issue, "_idx": i})
+
+        # 类型颜色映射
+        type_colors = {
+            "ocr": "#fa8c16",
+            "semantic": "#f5222d",
+            "text": "#eb2f96",
+            "structure": "#722ed1",
+            "format": "#1890ff",
+            "latex": "#13c2c2",
+        }
+
+        severity_colors = {"high": "#f5222d", "medium": "#faad14", "low": "#52c41a"}
+
+        type_labels = {
+            "ocr": "OCR错误",
+            "semantic": "语义错误",
+            "text": "文字错误",
+            "structure": "结构问题",
+            "format": "格式问题",
+            "latex": "LaTeX残留",
+        }
+
+        paragraphs_html: list[str] = []
+        for para in docx_text.paragraphs:
+            text = para.text
+            if not text.strip():
+                paragraphs_html.append("<div class='para empty'></div>")
+                continue
+
+            # 转义 HTML
+            escaped = self._html_escape(text)
+
+            if para.index in issues_by_para:
+                para_issues = issues_by_para[para.index]
+                # 对每个 issue 进行标记
+                marked = escaped
+                for issue in para_issues:
+                    original = issue.get("original", "")
+                    if original and original in marked:
+                        i_type = issue.get("type", "unknown")
+                        i_severity = issue.get("severity", "low")
+                        i_reason = self._html_escape(issue.get("reason", ""))
+                        i_suggested = self._html_escape(issue.get("suggested", ""))
+                        i_idx = issue.get("_idx", 0)
+
+                        tooltip = (
+                            f"<span class='tt-type' style='color:{type_colors.get(i_type, "#666")}'>"
+                            f"{type_labels.get(i_type, i_type)}</span>"
+                            f"<span class='tt-severity' style='color:{severity_colors.get(i_severity, "#666")}'>"
+                            f"[{'严重' if i_severity == 'high' else '中等' if i_severity == 'medium' else '轻微'}]</span>"
+                            f"<br/><b>原因:</b> {i_reason}"
+                            f"<br/><b>建议:</b> {i_suggested}"
+                            if i_suggested
+                            else ""
+                        )
+
+                        mark_tag = (
+                            f"<mark class='review-issue' "
+                            f"data-issue-idx='{i_idx}' "
+                            f"data-type='{i_type}' "
+                            f"data-severity='{i_severity}' "
+                            f"data-tooltip='{self._html_escape(tooltip)}'"
+                            f">{original}</mark>"
+                        )
+                        marked = marked.replace(original, mark_tag, 1)
+
+                cls = "para heading" if para.type == "heading" else "para body"
+                level_attr = f" data-level='{para.level}'" if para.level > 0 else ""
+                paragraphs_html.append(f"<div class='{cls}'{level_attr}>{marked}</div>")
+            else:
+                cls = "para heading" if para.type == "heading" else "para body"
+                level_attr = f" data-level='{para.level}'" if para.level > 0 else ""
+                paragraphs_html.append(f"<div class='{cls}'{level_attr}>{escaped}</div>")
+
+        # 构建完整 HTML
+        html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{
+  font-family: '宋体', SimSun, 'Times New Roman', serif;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #333;
+  padding: 40px 60px;
+  background: #fff;
+}}
+.para {{ margin-bottom: 4px; }}
+.para.empty {{ height: 12px; }}
+.heading {{ font-weight: bold; margin-top: 12px; }}
+.heading[data-level="1"] {{ font-size: 18px; text-align: center; margin-top: 20px; }}
+.heading[data-level="2"] {{ font-size: 15px; margin-top: 16px; }}
+mark.review-issue {{
+  background-color: #fff3b0;
+  padding: 1px 3px;
+  border-radius: 2px;
+  cursor: pointer;
+  position: relative;
+  border-bottom: 2px dashed #e6a817;
+  transition: background-color 0.2s;
+}}
+mark.review-issue:hover {{
+  background-color: #ffe58f;
+  border-bottom-color: #d48806;
+}}
+mark.review-issue[data-severity="high"] {{
+  border-bottom-color: #f5222d;
+  background-color: #fff1f0;
+}}
+mark.review-issue[data-severity="high"]:hover {{
+  background-color: #ffccc7;
+}}
+mark.review-issue::after {{
+  content: attr(data-tooltip);
+  display: none;
+  position: absolute;
+  left: 0;
+  bottom: 120%;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: nowrap;
+  z-index: 1000;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.15);
+  font-weight: normal;
+  color: #333;
+  max-width: 400px;
+  white-space: normal;
+}}
+mark.review-issue:hover::after {{
+  display: block;
+}}
+</style>
+</head>
+<body>
+{"".join(paragraphs_html)}
+<script>
+// 点击 issue 高亮通知父窗口
+document.querySelectorAll('mark.review-issue').forEach(function(el) {{
+  el.addEventListener('click', function() {{
+    var idx = this.getAttribute('data-issue-idx');
+    window.parent.postMessage({{ type: 'issue-click', issueIndex: parseInt(idx) }}, '*');
+  }});
+}});
+</script>
+</body>
+</html>"""
+        return html
+
+    @staticmethod
+    def _html_escape(text: str) -> str:
+        """HTML 转义"""
+        return (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&#39;")
+        )
+
+    # ==================== AI 修正 ====================
+
+    def fix_single_issue(
+        self,
+        task_id: str,
+        issue_index: int,
+        fix_text: str | None = None,
+        mode: str = "ai",
+    ) -> dict | None:
+        """修正单条审查 issue
+
+        Args:
+            task_id: 任务 ID
+            issue_index: issues 列表中的索引
+            fix_text: 手动修正文本（mode=manual 时使用）
+            mode: "ai" 或 "manual"
+
+        Returns:
+            dict: {success, original, fixed_text, issue_index}
+        """
+        logger.info("任务 %s: 修正 issue #%d (mode=%s)", task_id, issue_index, mode)
+
+        try:
+            # 获取 issues
+            issues = self._get_review_issues(task_id)
+            if issue_index >= len(issues):
+                return {"success": False, "error": f"Issue 索引 {issue_index} 越界"}
+
+            issue = issues[issue_index]
+
+            # 获取 DOCX 路径
+            with get_db_session() as db:
+                task = TaskCRUD.get(db, task_id)
+                if not task or not task.result_path:
+                    return {"success": False, "error": "任务或 DOCX 不存在"}
+                docx_path = task.result_path
+
+            original = issue.get("original", "")
+            suggested = issue.get("suggested", "")
+
+            if mode == "ai":
+                # LLM 修正
+                fixed_text = self._ai_fix_text(task_id, issue)
+                if not fixed_text:
+                    # AI 修正失败，使用建议兜底
+                    fixed_text = suggested if suggested else original
+            elif mode == "manual" and fix_text:
+                fixed_text = fix_text
+            else:
+                return {"success": False, "error": "缺少修正文本"}
+
+            if not fixed_text or fixed_text == original:
+                return {
+                    "success": False,
+                    "error": "修正文本为空或与原文相同",
+                    "original": original,
+                }
+
+            # 在 DOCX 中替换文本
+            replaced = self._replace_text_in_docx(docx_path, original, fixed_text)
+
+            if replaced:
+                # 移除该 issue（标记为已修正）
+                self._mark_issue_fixed(task_id, issue_index)
+
+            return {
+                "success": True,
+                "original": original,
+                "fixed_text": fixed_text,
+                "issue_index": issue_index,
+            }
+
+        except Exception as e:
+            logger.error("任务 %s: 修正 issue 失败: %s", task_id, e)
+            return {"success": False, "error": str(e)}
+
+    def batch_fix_issues(
+        self,
+        task_id: str,
+        auto_fix_low: bool = True,
+        issue_indices: list[int] | None = None,
+    ) -> dict | None:
+        """批量修正审查 issues
+
+        Args:
+            task_id: 任务 ID
+            auto_fix_low: 是否自动修正 low 级别
+            issue_indices: 指定修正的索引列表，为空则全部
+
+        Returns:
+            dict: {fixed, failed, details}
+        """
+        logger.info(
+            "任务 %s: 批量修正 (auto_low=%s, indices=%s)",
+            task_id,
+            auto_fix_low,
+            issue_indices,
+        )
+
+        issues = self._get_review_issues(task_id)
+        if not issues:
+            return {"fixed": 0, "failed": 0, "details": []}
+
+        # 确定需要修正的 issues
+        targets: list[int] = []
+        for i, issue in enumerate(issues):
+            if issue_indices is not None and i not in issue_indices:
+                continue
+            severity = issue.get("severity", "low")
+            if auto_fix_low and severity == "low":
+                targets.append(i)
+            elif severity in ("medium", "high"):
+                targets.append(i)
+            elif not auto_fix_low:
+                targets.append(i)
+
+        if not targets:
+            return {"fixed": 0, "failed": 0, "details": []}
+
+        details: list[dict] = []
+        fixed = 0
+        failed = 0
+
+        for idx in targets:
+            result = self.fix_single_issue(task_id, idx, mode="ai")
+            if result is None:
+                details.append({"issue_index": idx, "success": False, "error": "修正服务异常"})
+                failed += 1
+            elif result.get("success"):
+                details.append(result)
+                fixed += 1
+            else:
+                details.append(result)
+                failed += 1
+
+        logger.info("任务 %s: 批量修正完成, fixed=%d, failed=%d", task_id, fixed, failed)
+        return {"fixed": fixed, "failed": failed, "details": details}
+
+    def _ai_fix_text(self, task_id: str, issue: dict) -> str | None:
+        """使用 LLM 生成修正文本"""
+        llm = self._get_llm_client()
+        if not llm:
+            return None
+
+        original = issue.get("original", "")
+        suggested = issue.get("suggested", "")
+        reason = issue.get("reason", "")
+        itype = issue.get("type", "unknown")
+
+        # 简单修正直接返回建议
+        if itype in ("format", "latex") and suggested:
+            # 对于格式类问题，建议通常已经是正确的文本
+            if suggested != original:
+                return suggested
+
+        # 调用 LLM 修正
+        prompt = f"""你是一个文档审查修正助手。请根据审查意见修正以下文本。
+
+**原文:**
+{original}
+
+**问题类型:** {itype}
+**问题原因:** {reason}
+**修正建议:** {suggested}
+
+请直接输出修正后的文本（只输出修正后的文本，不要任何解释）。如果原文本身没问题，直接输出原文。"""
+
+        try:
+            response = llm.invoke(prompt).content
+            fixed = response.strip().strip('"').strip("'")
+            # 清理可能的代码块
+            if fixed.startswith("```"):
+                fixed = fixed.split("\n", 1)[-1].rsplit("\n```", 1)[0]
+            return fixed if fixed else suggested
+        except Exception as e:
+            logger.warning("AI 修正失败: %s，使用建议兜底", e)
+            return suggested if suggested else original
+
+    @staticmethod
+    def _replace_text_in_docx(docx_path: str, original: str, replacement: str) -> bool:
+        """在 DOCX 中替换文本（简单替换，作用于所有段落和表格）"""
+        from docx import Document
+        from docx.oxml.ns import qn
+
+        if not original or original == replacement:
+            return False
+
+        try:
+            doc = Document(docx_path)
+            replaced = False
+
+            # 遍历段落
+            for para in doc.paragraphs:
+                if original in para.text:
+                    for run in para.runs:
+                        if original in run.text:
+                            run.text = run.text.replace(original, replacement, 1)
+                            replaced = True
+                            break
+                    # 如果跨 run，用段落级别替换
+                    if not replaced and original in para.text:
+                        inline = para._element
+                        text = "".join((t.text or "") for t in inline.iter(qn("w:t")))
+                        new_text = text.replace(original, replacement, 1)
+                        if new_text != text:
+                            # 清除所有 run 并重新设置
+                            for r in para.runs:
+                                r.text = ""
+                            if para.runs:
+                                para.runs[0].text = new_text
+                            replaced = True
+
+            if replaced:
+                doc.save(docx_path)
+            return replaced
+
+        except Exception as e:
+            logger.warning("DOCX 文本替换失败: %s", e)
+            return False
+
+    def _mark_issue_fixed(self, task_id: str, issue_index: int) -> None:
+        """标记 issue 为已修正（从审查结果中移除或标记）"""
+        try:
+            with get_db_session() as db:
+                review = TaskReviewCRUD.get_by_task(db, task_id, review_type="quick")
+                if not review or not review.issues:
+                    return
+
+                issues_data = review.issues.copy()
+                issue_list = issues_data.get("issues", [])
+                if issue_index < len(issue_list):
+                    # 标记为已修正
+                    issue_list[issue_index]["_fixed"] = True
+                    issues_data["issues"] = issue_list
+                    review.issues = issues_data
+                    db.commit()
+        except Exception as e:
+            logger.warning("标记 issue 已修正失败: %s", e)
+
+    # ==================== 辅助方法 ====================
+
+    def _get_review_issues(self, task_id: str) -> list[dict]:
+        """获取任务的最新审查 issues（优先 quick review）"""
+        try:
+            with get_db_session() as db:
+                review = TaskReviewCRUD.get_by_task(db, task_id, review_type="quick")
+                if not review or not review.issues:
+                    review = TaskReviewCRUD.get_by_task(db, task_id)
+                if review and review.issues:
+                    issues = review.issues.get("issues", [])
+                    # 过滤已修正的
+                    return [i for i in issues if not i.get("_fixed")]
+            return []
+        except Exception as e:
+            logger.warning("获取审查 issues 失败: %s", e)
+            return []
+
+    @staticmethod
+    def _parse_location_index(location: str) -> int:
+        """解析 location 字段获取段落索引（0-based）"""
+        import re
+
+        match = re.search(r"(\d+)", location)
+        if match:
+            return int(match.group(1)) - 1
+        return -1

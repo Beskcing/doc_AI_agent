@@ -3,6 +3,11 @@
 提供排版后文档质量审查的 API：
 - GET  /api/tasks/{task_id}/review — 获取审查结果
 - POST /api/tasks/{task_id}/review/deep — 触发深度审查
+- POST /api/tasks/{task_id}/review/mark — 生成标记版 DOCX
+- GET  /api/tasks/{task_id}/review/marked-docx — 下载标记版 DOCX
+- GET  /api/tasks/{task_id}/review/marked-preview — HTML 标记预览
+- POST /api/tasks/{task_id}/review/fix — 单条修正
+- POST /api/tasks/{task_id}/review/fix-batch — 批量修正
 """
 
 from __future__ import annotations
@@ -11,9 +16,15 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 
 from src.api.middleware.auth import get_current_user
 from src.api.models import (
+    BatchFixRequest,
+    FixIssueRequest,
+    FixIssueResponse,
+    MarkDocxResponse,
+    MarkedPreviewResponse,
     ResponseModel,
     ReviewIssue,
     ReviewResponse,
@@ -174,3 +185,161 @@ async def list_reviews(
         return ResponseModel(
             data={"reviews": [_review_to_response(r).model_dump() for r in reviews]},
         )
+
+
+# ==================== 审查标记与修正 API ====================
+
+
+@router.post("/{task_id}/review/mark", response_model=ResponseModel)
+async def mark_docx(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
+    """生成标记版 DOCX（黄色高亮 + 批注）
+
+    在排版完成的 DOCX 中为审查发现的问题添加标记。
+    返回标记版 DOCX 的路径和统计信息。
+    """
+    with get_db_session() as db:
+        task = TaskCRUD.get(db, task_id, user_id=current_user.id)
+        if not task:
+            return ResponseModel(code=404, message="任务不存在")
+        if task.status != "completed":
+            return ResponseModel(code=400, message="任务未完成")
+        if not task.result_path:
+            return ResponseModel(code=400, message="任务无输出文件")
+
+    review_service = _get_review_service()
+    result = await run_in_threadpool(review_service.generate_marked_docx, task_id)
+
+    if result is None:
+        return ResponseModel(code=500, message="生成标记版 DOCX 失败")
+
+    return ResponseModel(data=MarkDocxResponse(**result).model_dump())
+
+
+@router.get("/{task_id}/review/marked-docx", response_model=None)
+async def download_marked_docx(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_user),
+):
+    """下载标记版 DOCX 文件"""
+    with get_db_session() as db:
+        task = TaskCRUD.get(db, task_id, user_id=current_user.id)
+        if not task:
+            return ResponseModel(code=404, message="任务不存在")
+        if not task.result_path:
+            return ResponseModel(code=404, message="输出文件不存在")
+
+    result_dir = Path(task.result_path).parent
+    marked_path = result_dir / "review_marked.docx"
+
+    if not marked_path.exists():
+        # 首次访问时自动生成
+        review_service = _get_review_service()
+        result = await run_in_threadpool(review_service.generate_marked_docx, task_id)
+        if result is None:
+            return ResponseModel(code=500, message="生成标记版 DOCX 失败")
+        marked_path = Path(result.get("marked_docx_path", ""))
+
+    if not marked_path.exists():
+        return ResponseModel(code=404, message="标记版 DOCX 不存在，请先生成")
+
+    original_stem = Path(task.filename or "document").stem
+    download_name = f"{original_stem}_审查标记.docx"
+
+    return FileResponse(
+        path=str(marked_path),
+        filename=download_name,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@router.get("/{task_id}/review/marked-preview", response_model=ResponseModel)
+async def get_marked_preview(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
+    """获取标记版 HTML 预览
+
+    返回带问题高亮的 HTML 内容，前端可通过 iframe 渲染。
+    """
+    with get_db_session() as db:
+        task = TaskCRUD.get(db, task_id, user_id=current_user.id)
+        if not task:
+            return ResponseModel(code=404, message="任务不存在")
+        if task.status != "completed":
+            return ResponseModel(code=400, message="任务未完成")
+
+    review_service = _get_review_service()
+    result = await run_in_threadpool(review_service.generate_marked_html, task_id)
+
+    if result is None:
+        return ResponseModel(code=500, message="生成 HTML 预览失败")
+
+    return ResponseModel(data=MarkedPreviewResponse(**result).model_dump())
+
+
+@router.post("/{task_id}/review/fix", response_model=ResponseModel)
+async def fix_single_issue(
+    task_id: str,
+    body: FixIssueRequest,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
+    """修正单条审查 issue
+
+    - mode=ai: LLM 自动修正
+    - mode=manual: 使用 fix_text 中的文本替换
+    """
+    with get_db_session() as db:
+        task = TaskCRUD.get(db, task_id, user_id=current_user.id)
+        if not task:
+            return ResponseModel(code=404, message="任务不存在")
+        if task.status != "completed":
+            return ResponseModel(code=400, message="任务未完成")
+
+    review_service = _get_review_service()
+    result = await run_in_threadpool(
+        review_service.fix_single_issue,
+        task_id,
+        body.issue_index,
+        body.fix_text,
+        body.mode,
+    )
+
+    if result is None:
+        return ResponseModel(code=500, message="修正失败")
+
+    return ResponseModel(data=result)
+
+
+@router.post("/{task_id}/review/fix-batch", response_model=ResponseModel)
+async def fix_batch_issues(
+    task_id: str,
+    body: BatchFixRequest,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
+    """批量修正审查 issues
+
+    - auto_fix_low=True: 自动修正所有 low 级别 issues
+    - issue_indices: 指定修正的 issue 索引列表
+    """
+    with get_db_session() as db:
+        task = TaskCRUD.get(db, task_id, user_id=current_user.id)
+        if not task:
+            return ResponseModel(code=404, message="任务不存在")
+        if task.status != "completed":
+            return ResponseModel(code=400, message="任务未完成")
+
+    review_service = _get_review_service()
+    result = await run_in_threadpool(
+        review_service.batch_fix_issues,
+        task_id,
+        body.auto_fix_low,
+        body.issue_indices,
+    )
+
+    if result is None:
+        return ResponseModel(code=500, message="批量修正失败")
+
+    return ResponseModel(data=FixIssueResponse(**result).model_dump())
