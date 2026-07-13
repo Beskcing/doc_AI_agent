@@ -60,7 +60,8 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
-| 2026-07-13 | fix | 审查标记HTML预览tooltip修复: 将tooltip内容从HTML格式改为纯文本(\\n换行), CSS white-space改为pre-line, 解决attr(data-tooltip)双转义导致显示原始标签的问题; 同步移除_build_marked_html中未使用的type_colors和severity_colors变量 |
+| 2026-07-13 | feat | 内容编辑改用排版后DOCX: ContentEditService.get_content_html改用task.result_path(formatted_styled.docx), 前端按钮文字从'MinerU原始'改为'排版后' |
+| 2026-07-13 | fix | 审查标记HTML预览tooltip修复: 将tooltip内容从HTML格式改为纯文本(\n换行), CSS white-space改为pre-line, 解决attr(data-tooltip)双转义导致显示原始标签的问题; 同步移除_build_marked_html中未使用的type_colors和severity_colors变量 |
 | 2026-07-13 | fix | 审查标记面板补全latex类型: issueTypeColors/issueTypeLabels添加latex:'LaTeX残留'(cyan), 两个审查Tab的筛选下拉框均补全latex选项 |
 | 2026-07-13 | feat | 审查标记与AI修正完整实现: DocxReviewMarker(DOCX黄色高亮+Word批注+lxml注入comments.xml+zip打包), HTML标记预览API(带tooltip气泡+postMessage点击联动), 标记版DOCX下载(FileResponse+JWT认证), 单条/批量AI修正API(_idx索引映射), 重新审查API(POST requick), 前端独立「审查标记与修正」Tab(左侧iframe预览60%+右侧问题列表40%+筛选排序+AI修正/手动修改/忽略按钮+批量修正+重新审查) |
 | 2026-07-12 | feat | 深度审查新增LaTeX公式残留审查维度: _QUICK_CHECK_PATTERNS添加50+个LaTeX命令正则(含$$/$分隔符/常用命令/希腊字母/环境/字体/运算符/修饰符), _build_summary新增latex_residue统计字段, 表格内LaTeX也能被审查覆盖 |
