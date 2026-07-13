@@ -60,6 +60,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-13 | perf | 审查标记HTML预览性能优化: DocxReviewService增加类级别_html_cache缓存, generate_marked_html首次生成后缓存结果, 修正/重新审查操作自动清除缓存, 后续切换Tab响应<100ms |
 | 2026-07-13 | feat | 内容编辑改用排版后DOCX: ContentEditService.get_content_html改用task.result_path(formatted_styled.docx), 前端按钮文字从'MinerU原始'改为'排版后' |
 | 2026-07-13 | fix | 审查标记HTML预览tooltip修复: 将tooltip内容从HTML格式改为纯文本(\n换行), CSS white-space改为pre-line, 解决attr(data-tooltip)双转义导致显示原始标签的问题; 同步移除_build_marked_html中未使用的type_colors和severity_colors变量 |
 | 2026-07-13 | fix | 审查标记面板补全latex类型: issueTypeColors/issueTypeLabels添加latex:'LaTeX残留'(cyan), 两个审查Tab的筛选下拉框均补全latex选项 |

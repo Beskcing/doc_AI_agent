@@ -84,6 +84,9 @@ class DocxReviewService:
     # 深度审查每块最大字符数
     DEEP_REVIEW_CHUNK_SIZE: int = 8000
 
+    # 标记版 HTML 缓存: {task_id: {html, issues, summary}}
+    _html_cache: dict[str, dict] = {}
+
     def __init__(
         self,
         config: AppConfig,
@@ -176,6 +179,8 @@ class DocxReviewService:
                 task_id,
                 summary["total_issues"],
             )
+            # 审查结果变化，清除 HTML 缓存
+            self.invalidate_html_cache(task_id)
             return result
 
         except Exception as e:
@@ -322,6 +327,8 @@ class DocxReviewService:
                 summary["structure_issues"],
                 summary["format_issues"],
             )
+            # 审查结果变化，清除 HTML 缓存
+            self.invalidate_html_cache(task_id)
             return result
 
         except Exception as e:
@@ -556,6 +563,11 @@ class DocxReviewService:
             dict: {html, issues, summary}
             None: 失败
         """
+        # 检查缓存
+        if task_id in self._html_cache:
+            logger.info("任务 %s: 使用缓存的标记版 HTML", task_id)
+            return self._html_cache[task_id]
+
         logger.info("任务 %s: 生成标记版 HTML 预览", task_id)
 
         try:
@@ -579,11 +591,25 @@ class DocxReviewService:
             # 构建带标记的 HTML
             html = self._build_marked_html(docx_text, issues)
 
-            return {"html": html, "issues": issues, "summary": summary}
+            result = {"html": html, "issues": issues, "summary": summary}
+
+            # 写入缓存
+            self._html_cache[task_id] = result
+
+            return result
 
         except Exception as e:
             logger.error("任务 %s: 生成 HTML 预览失败: %s", task_id, e)
             return None
+
+    def invalidate_html_cache(self, task_id: str) -> None:
+        """清除指定任务的 HTML 缓存
+
+        在审查数据变化时调用（修正、重新审查等）
+        """
+        if task_id in self._html_cache:
+            del self._html_cache[task_id]
+            logger.info("任务 %s: 已清除标记版 HTML 缓存", task_id)
 
     def _build_marked_html(self, docx_text: DocxText, issues: list[dict]) -> str:
         """构建带标记的 HTML 内容"""

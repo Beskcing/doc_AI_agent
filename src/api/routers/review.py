@@ -310,6 +310,9 @@ async def fix_single_issue(
     if result is None:
         return ResponseModel(code=500, message="修正失败")
 
+    # 修正后清除 HTML 缓存
+    review_service.invalidate_html_cache(task_id)
+
     return ResponseModel(data=result)
 
 
@@ -336,6 +339,9 @@ async def requick_review(
 
     if result is None:
         return ResponseModel(code=500, message="快速审查失败")
+
+    # 重新审查后清除 HTML 缓存
+    review_service.invalidate_html_cache(task_id)
 
     return ResponseModel(data=result)
 
@@ -368,5 +374,8 @@ async def fix_batch_issues(
 
     if result is None:
         return ResponseModel(code=500, message="批量修正失败")
+
+    # 修正后清除 HTML 缓存
+    review_service.invalidate_html_cache(task_id)
 
     return ResponseModel(data=FixIssueResponse(**result).model_dump())
