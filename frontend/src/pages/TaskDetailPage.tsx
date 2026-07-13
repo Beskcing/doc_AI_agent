@@ -1,3 +1,14 @@
+/**
+ * 任务详情页面 — 排版结果查看与操作
+ *
+ * 功能：
+ * - 任务状态/进度/错误信息展示
+ * - 排版后 DOCX 预览（HTML 渲染）与下载
+ * - 内容编辑（TinyMCE 富文本 + LLM 对话修改）
+ * - 排版审查（快速审查 / 深度审查 / 审查修正）
+ * - 样式模板应用与历史记录
+ */
+
 import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {

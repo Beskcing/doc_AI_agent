@@ -60,6 +60,7 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-13 | docs | 文档更新与代码注释: 重写 ARCHITECTURE.md(244行,新增系统架构图/完整模块结构/数据库模型表/认证权限/异步任务/前端架构/部署架构), 增量更新 USER_GUIDE.md(新增排版审查章节+管理员前端说明), 增量更新 DEV_GUIDE.md(补全审查模块依赖+关键文件索引+变更记录), 前端全部组件/页面添加模块级 JSDoc 注释 |
 | 2026-07-13 | fix | 审查修正/内容编辑格式保留: _replace_text_in_docx重写跨run替换逻辑(构建字符-run映射,保留所有run格式属性), 内容编辑HTML模式新增_merge_docx_content方法(将新内容合并到排版后DOCX模板,保留页面布局/分节/页眉页脚) |
 | 2026-07-13 | perf | 审查标记HTML预览性能优化: DocxReviewService增加类级别_html_cache缓存, generate_marked_html首次生成后缓存结果, 修正/重新审查操作自动清除缓存, 后续切换Tab响应<100ms |
 | 2026-07-13 | feat | 内容编辑改用排版后DOCX: ContentEditService.get_content_html改用task.result_path(formatted_styled.docx), 前端按钮文字从'MinerU原始'改为'排版后' |

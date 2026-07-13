@@ -1,3 +1,9 @@
+/**
+ * 系统配置页面（仅管理员）
+ *
+ * 配置 LLM Provider/模型、RAG 权重、Pandoc 路径等全局参数。
+ */
+
 import React, { useState, useEffect } from 'react'
 import { Card, Form, Input, InputNumber, Select, Button, message } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'

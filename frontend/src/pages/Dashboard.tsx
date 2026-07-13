@@ -1,3 +1,10 @@
+/**
+ * 工作台页面 — 任务概览与统计
+ *
+ * 展示任务统计卡片、磁盘用量、最近任务列表，
+ * 支持清理旧任务和快速新建任务。
+ */
+
 import React, { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Card, Row, Col, Statistic, Table, Tag, Button, Space, Spin, Modal, InputNumber, message, Tooltip } from 'antd'

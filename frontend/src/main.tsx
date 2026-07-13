@@ -1,3 +1,9 @@
+/**
+ * 应用入口 — 挂载 React 根节点
+ *
+ * 引入 BrowserRouter（SPA 路由）、antd ConfigProvider（中文国际化）。
+ */
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'

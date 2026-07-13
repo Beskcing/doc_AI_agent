@@ -14,8 +14,9 @@
 ┌──────────────────────────▼──────────────────────────────────────┐
 │                    FastAPI 路由层                                │
 │  routers/auth.py   routers/admin.py   routers/upload.py         │
-│  routers/tasks.py  routers/chat.py    routers/templates.py      │
-│  routers/kb.py     routers/config.py  routers/formatters.py     │
+│  routers/review.py   routers/tasks.py  routers/chat.py              │
+│  routers/templates.py  routers/kb.py   routers/config.py            │
+│  routers/formatters.py                                              │
 │                                                                  │
 │  middleware/auth.py — JWT verify / get_current_user/admin       │
 └──────────────────────────┬──────────────────────────────────────┘
@@ -24,7 +25,9 @@
 │                     服务层                                       │
 │  PipelineService ── 核心排版流程                                 │
 │  PreviewService  ── PDF/DOCX 预览                                │
-│  ContentEditService ── 文档内容编辑                              │
+│  ContentEditService ── 文档内容编辑 (MD/HTML → DOCX 合并)        │
+│  DocxReviewService ── 排版审查 (快速规则 + 深度 LLM)            │
+│  TaskManager     ── 任务状态管理 + 异步分发                      │
 │  ServiceDeps     ── LLM/RAG/Prompts 依赖注入                     │
 └──────────────────────────┬──────────────────────────────────────┘
                            │
@@ -109,6 +112,12 @@ DocxStyler / GbtDocxFormatter → 输出 DOCX
 | `src/db/crud.py` | 数据访问层（含 UserCRUD / TaskCRUD / ChatSessionCRUD 等） |
 | `src/db/models.py` | 9 张表 ORM 模型（含 UserModel / TaskReviewModel） |
 | `src/utils/file_utils.py` | 文件系统工具（按 user_id 隔离的路径） |
+| `src/api/services/docx_review_service.py` | 排版审查服务（快速/深度审查 + 修正 + HTML 缓存） |
+| `src/api/services/content_edit_service.py` | 内容编辑服务（MD/HTML → DOCX 合并保留格式） |
+| `src/api/routers/review.py` | 排版审查 API（快速/深度审查/修正/批量修正） |
+| `src/tools/docx_text_extractor.py` | DOCX 全文提取（审查用） |
+| `src/tools/docx_review_marker.py` | 审查标记渲染（HTML 标记版） |
+| `src/utils/text_diff.py` | 文本差异比较（审查用） |
 | `src/tools/formatters/registry.py` | Formatter 自动发现 + 注册表 |
 | `src/tools/formatters/base.py` | Formatter 抽象基类 |
 | `src/tools/formatters/gbt_1_1.py` | GB/T 1.1 硬编码格式化器 |
@@ -951,6 +960,11 @@ def list_new_items(db: Session, page: int, page_size: int, user_id: str | None =
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-13 | fix | 审查修正/内容编辑格式保留: `_replace_text_in_docx` 重写跨 run 替换逻辑(保留字体/字号/加粗), `_merge_docx_content` 新增(保留 sectPr 页面布局), HTML 缓存 + 失效机制 |
+| 2026-07-12 | feat | 深度审查新增 LaTeX 公式残留审查维度: `_QUICK_CHECK_PATTERNS` 添加 50+ 个 LaTeX 命令正则, `_build_summary` 新增 `latex_residue` 统计字段 |
+| 2026-07-10 | fix | TinyMCE 编辑器无法加载: `main.py` 新增 `/tinymce` 静态文件挂载 |
+| 2026-07-10 | fix | DOCX 下载失败(401): TaskDetailPage 下载改用 fetch+Blob 携带 JWT token |
+| 2026-07-10 | feat | 管理员用户管理前端页面: AdminUsersPage + api.ts 4个管理 API + 路由集成 |
 | 2026-07-10 | fix | Docker Alembic迁移修复: env.py 读取 DATABASE_URL 环境变量, Docker 容器内 alembic 正确连接 PostgreSQL |
 | 2026-07-10 | fix | Docker 部署依赖补全: pyproject.toml 添加 psycopg2-binary/celery/redis/bcrypt |
 | 2026-07-10 | fix | 排版后审查误报修复: quick_review 异常 Unicode 正则扩充合法字符范围(拉丁扩展/希腊字母/数学运算符等), 消除技术文档 100% 误报 |

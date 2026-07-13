@@ -1,3 +1,10 @@
+/**
+ * 应用根组件 — 路由配置
+ *
+ * 公开路由：/login（登录/注册）
+ * 受保护路由：由 AuthGuard 鉴权，AppLayout 提供侧边栏布局
+ */
+
 import { Routes, Route } from 'react-router-dom'
 import AuthGuard from './components/AuthGuard'
 import AppLayout from './components/AppLayout'

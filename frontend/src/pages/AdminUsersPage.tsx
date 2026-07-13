@@ -1,3 +1,13 @@
+/**
+ * 管理员用户管理页面（仅管理员）
+ *
+ * 功能：
+ * - 用户列表（表格 + 分页）
+ * - 创建用户（弹窗表单）
+ * - 编辑用户（重置密码/启用禁用/改角色）
+ * - 删除用户（级联删除所有数据）
+ */
+
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Card,

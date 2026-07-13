@@ -1,3 +1,12 @@
+/**
+ * 应用主布局 — 侧边栏 + 顶栏 + 内容区
+ *
+ * 功能：
+ * - 可折叠侧边栏菜单（根据用户角色过滤管理员菜单）
+ * - 顶栏任务徽标 + 用户下拉菜单
+ * - 通过 <Outlet /> 渲染子路由
+ */
+
 import React, { useState, useEffect, useMemo } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {

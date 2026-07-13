@@ -1,3 +1,10 @@
+/**
+ * 全局状态管理 — Zustand Store
+ *
+ * 存储系统配置、支持的标准列表、LLM 模型列表等全局数据，
+ * 供各页面组件共享使用。
+ */
+
 import { create } from 'zustand'
 import { getConfig, getSupportedStandards, getLlmModels } from '../services/api'
 

@@ -1,3 +1,13 @@
+/**
+ * 样式模板管理页面
+ *
+ * 功能：
+ * - 模板列表展示（分页 + JSON 配置预览）
+ * - 上传 Word 模板并自动提取样式
+ * - 创建/编辑/删除模板
+ * - 将模板应用到已有任务
+ */
+
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Card,

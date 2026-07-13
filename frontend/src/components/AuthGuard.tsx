@@ -1,3 +1,11 @@
+/**
+ * 路由守卫组件 — JWT 鉴权
+ *
+ * 进入受保护路由前验证 Token 有效性：
+ * - 无 Token 或 Token 失效 → 跳转登录页
+ * - Token 有效 → 渲染子组件
+ */
+
 import React, { useEffect, useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { Spin } from 'antd'

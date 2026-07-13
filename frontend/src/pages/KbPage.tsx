@@ -1,3 +1,12 @@
+/**
+ * 知识库管理页面（仅管理员）
+ *
+ * 功能：
+ * - 知识库文档列表、上传、删除
+ * - 查看/编辑文档内容（弹窗编辑器）
+ * - 重建索引
+ */
+
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Table,

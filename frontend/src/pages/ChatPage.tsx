@@ -1,3 +1,13 @@
+/**
+ * 对话排版页面 — 多轮对话修改样式
+ *
+ * 功能：
+ * - 会话管理（创建/切换/删除会话）
+ * - 自然语言对话修改排版样式
+ * - 模板上传/提取/保存/应用
+ * - 文档内容 LLM 对话编辑
+ */
+
 import React, { useState, useRef, useEffect } from 'react'
 import {
   Row,

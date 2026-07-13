@@ -1,3 +1,9 @@
+/**
+ * 任务管理页面 — 任务列表
+ *
+ * 展示当前用户的所有排版任务，支持状态筛选、重试、删除和查看详情。
+ */
+
 import React, { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {

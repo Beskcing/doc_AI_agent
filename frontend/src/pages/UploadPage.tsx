@@ -1,3 +1,11 @@
+/**
+ * 文档上传页面 — 分步向导
+ *
+ * 步骤 1：选择文件（支持 PDF/MD/TXT，单文件 + 批量）
+ * 步骤 2：配置排版参数（目标标准、模板、用户要求）
+ * 步骤 3：提交任务并跳转
+ */
+
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {

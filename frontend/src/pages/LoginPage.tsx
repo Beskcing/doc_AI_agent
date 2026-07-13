@@ -1,3 +1,9 @@
+/**
+ * 登录/注册页面
+ *
+ * 支持登录与注册两种模式切换，JWT 认证。
+ */
+
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, Form, Input, Button, Typography, message, Space, Divider } from 'antd'

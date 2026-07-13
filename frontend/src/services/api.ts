@@ -1,3 +1,12 @@
+/**
+ * API 服务层 — 统一 HTTP 请求封装
+ *
+ * 基于 axios 实例，提供：
+ * - JWT Token 自动附加（请求拦截器）
+ * - Token 过期自动刷新（401 响应拦截）
+ * - 各业务模块 API 调用函数
+ */
+
 import axios from 'axios'
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
