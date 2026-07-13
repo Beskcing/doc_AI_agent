@@ -556,6 +556,7 @@ const TaskDetailPage: React.FC = () => {
     text: 'volcano',
     structure: 'purple',
     format: 'blue',
+    latex: 'cyan',
   }
   const issueTypeLabels: Record<string, string> = {
     ocr: 'OCR错误',
@@ -563,6 +564,7 @@ const TaskDetailPage: React.FC = () => {
     text: '文字错误',
     structure: '结构问题',
     format: '格式问题',
+    latex: 'LaTeX残留',
   }
   const severityColors: Record<string, string> = {
     high: '#f5222d',
@@ -661,6 +663,7 @@ const TaskDetailPage: React.FC = () => {
               { value: 'text', label: '文字错误' },
               { value: 'structure', label: '结构问题' },
               { value: 'format', label: '格式问题' },
+              { value: 'latex', label: 'LaTeX残留' },
             ]}
           />
         </Col>

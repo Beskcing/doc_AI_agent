@@ -576,18 +576,6 @@ class DocxReviewService:
                     issues_by_para[para_idx] = []
                 issues_by_para[para_idx].append({**issue, "_idx": i})
 
-        # 类型颜色映射
-        type_colors = {
-            "ocr": "#fa8c16",
-            "semantic": "#f5222d",
-            "text": "#eb2f96",
-            "structure": "#722ed1",
-            "format": "#1890ff",
-            "latex": "#13c2c2",
-        }
-
-        severity_colors = {"high": "#f5222d", "medium": "#faad14", "low": "#52c41a"}
-
         type_labels = {
             "ocr": "OCR错误",
             "semantic": "语义错误",
@@ -620,17 +608,10 @@ class DocxReviewService:
                         i_suggested = self._html_escape(issue.get("suggested", ""))
                         i_idx = issue.get("_idx", 0)
 
-                        default_color = "#666"
-                        tooltip = (
-                            f"<span class='tt-type' style='color:{type_colors.get(i_type, default_color)}'>"
-                            f"{type_labels.get(i_type, i_type)}</span>"
-                            f"<span class='tt-severity' style='color:{severity_colors.get(i_severity, default_color)}'>"
-                            f"[{'严重' if i_severity == 'high' else '中等' if i_severity == 'medium' else '轻微'}]</span>"
-                            f"<br/><b>原因:</b> {i_reason}"
-                            f"<br/><b>建议:</b> {i_suggested}"
-                            if i_suggested
-                            else ""
-                        )
+                        severity_text = "严重" if i_severity == "high" else "中等" if i_severity == "medium" else "轻微"
+                        tooltip = f"[{type_labels.get(i_type, i_type)}] [{severity_text}]\n原因: {i_reason}"
+                        if i_suggested:
+                            tooltip += f"\n建议: {i_suggested}"
 
                         mark_tag = (
                             f"<mark class='review-issue' "
@@ -702,13 +683,12 @@ mark.review-issue::after {{
   padding: 8px 12px;
   font-size: 12px;
   line-height: 1.6;
-  white-space: nowrap;
+  white-space: pre-line;
   z-index: 1000;
   box-shadow: 0 3px 12px rgba(0,0,0,0.15);
   font-weight: normal;
   color: #333;
   max-width: 400px;
-  white-space: normal;
 }}
 mark.review-issue:hover::after {{
   display: block;
