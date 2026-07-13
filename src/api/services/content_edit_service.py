@@ -73,7 +73,15 @@ class ContentEditService:
         if content_type == "html":
             markdown_content = self._html_to_markdown(content, task_id)
             if regenerate_docx:
-                docx_path = self._html_to_docx(task_id, content)
+                new_content_docx = self._html_to_docx(task_id, content)
+                # 使用排版后的 DOCX 作为模板，保留页面布局/分节/页眉页脚
+                template_docx = task.result_path
+                if template_docx and Path(template_docx).exists():
+                    merged_path = str(result_dir / "formatted_merged.docx")
+                    docx_path = self._merge_docx_content(template_docx, new_content_docx, merged_path)
+                    logger.info("任务 %s: HTML 编辑后合并到排版模板 DOCX", task_id)
+                else:
+                    docx_path = new_content_docx
 
         cleaned_md_path = result_dir / "cleaned.md"
         cleaned_md_path.write_text(markdown_content, encoding="utf-8")
@@ -289,6 +297,57 @@ class ContentEditService:
                 Path(html_tmp_path).unlink()
             except OSError:
                 pass
+
+    @staticmethod
+    def _merge_docx_content(template_path: str, content_path: str, output_path: str) -> str:
+        """将内容 DOCX 的正文合并到模板 DOCX 中，保留模板的页面布局/分节/页眉页脚
+
+        Args:
+            template_path: 排版后的 DOCX 路径（保留页面布局/分节/页眉页脚）
+            content_path: 新内容 DOCX 路径（包含编辑后的正文）
+            output_path: 输出路径
+
+        Returns:
+            输出文件路径
+        """
+        import copy
+
+        from docx import Document
+        from docx.oxml.ns import qn
+
+        template_doc = Document(template_path)
+        content_doc = Document(content_path)
+
+        template_body = template_doc.element.body
+        content_body = content_doc.element.body
+
+        # 找到模板的 sectPr（包含页面布局/页眉页脚/分节信息）
+        template_sect_pr = template_body.find(qn("w:sectPr"))
+
+        # 移除模板 body 中的段落和表格，保留 sectPr 等其他元素
+        elements_to_remove = []
+        for child in template_body:
+            tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+            if tag in ("p", "tbl"):
+                elements_to_remove.append(child)
+        for elem in elements_to_remove:
+            template_body.remove(elem)
+
+        # 从内容 DOCX 复制段落和表格到模板，插入到 sectPr 之前
+        insert_index = (
+            list(template_body).index(template_sect_pr) if template_sect_pr is not None else len(list(template_body))
+        )
+
+        for child in list(content_body):
+            tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+            if tag in ("p", "tbl"):
+                new_elem = copy.deepcopy(child)
+                template_body.insert(insert_index, new_elem)
+                insert_index += 1
+
+        template_doc.save(output_path)
+        logger.info("DOCX 合并完成: 模板=%s, 内容=%s → %s", template_path, content_path, output_path)
+        return output_path
 
     def _llm_edit_content_full_mode(self, markdown_content: str, message: str) -> tuple[str, str]:
         """全量模式：LLM 输出完整修改后文档（适用于小文档）"""

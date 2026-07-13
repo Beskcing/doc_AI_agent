@@ -993,9 +993,14 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
 
     @staticmethod
     def _replace_text_in_docx(docx_path: str, original: str, replacement: str) -> bool:
-        """在 DOCX 中替换文本（简单替换，作用于所有段落和表格）"""
+        """在 DOCX 中替换文本（保留 run 级别格式）
+
+        替换策略：
+        - 单 run 内替换：直接 run.text.replace()，格式完全保留
+        - 跨 run 替换：将 replacement 放入第一个受影响的 run（保留其格式），
+          后续受影响的 run 仅清空文本（保留格式属性如字体/字号/加粗等）
+        """
         from docx import Document
-        from docx.oxml.ns import qn
 
         if not original or original == replacement:
             return False
@@ -1004,25 +1009,137 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
             doc = Document(docx_path)
             replaced = False
 
-            # 遍历段落
             for para in doc.paragraphs:
-                if original in para.text:
-                    for run in para.runs:
-                        if original in run.text:
-                            run.text = run.text.replace(original, replacement, 1)
-                            replaced = True
-                            break
-                    # 如果跨 run，用段落级别替换
-                    if not replaced and original in para.text:
-                        inline = para._element
-                        text = "".join((t.text or "") for t in inline.iter(qn("w:t")))
-                        new_text = text.replace(original, replacement, 1)
-                        if new_text != text:
-                            # 清除所有 run 并重新设置
-                            for r in para.runs:
-                                r.text = ""
-                            if para.runs:
-                                para.runs[0].text = new_text
+                if original not in para.text:
+                    continue
+
+                # 先尝试单 run 内替换（最快，格式完全保留）
+                single_run_done = False
+                for run in para.runs:
+                    if original in run.text:
+                        run.text = run.text.replace(original, replacement, 1)
+                        single_run_done = True
+                        replaced = True
+                        break
+
+                if single_run_done:
+                    continue
+
+                # 跨 run 替换：构建字符位置到 run 的映射
+                runs = para.runs
+                if not runs:
+                    continue
+
+                # 拼接所有 run 文本，记录每个字符属于哪个 run
+                full_text = "".join(r.text for r in runs)
+                if original not in full_text:
+                    continue
+
+                start_pos = full_text.index(original)
+                end_pos = start_pos + len(original)
+
+                # 构建 run 边界列表：[(run_index, start_char, end_char), ...]
+                run_boundaries = []
+                char_offset = 0
+                for i, r in enumerate(runs):
+                    run_len = len(r.text)
+                    run_boundaries.append((i, char_offset, char_offset + run_len))
+                    char_offset += run_len
+
+                # 找到受影响的 run 范围
+                affected_runs = []
+                for idx, r_start, r_end in run_boundaries:
+                    # run 与 [start_pos, end_pos) 有交集
+                    if r_start < end_pos and r_end > start_pos:
+                        affected_runs.append(idx)
+
+                if not affected_runs:
+                    continue
+
+                # 第一个受影响的 run：保留其格式，设置文本
+                first_idx = affected_runs[0]
+                first_run = runs[first_idx]
+                _, first_start, first_end = run_boundaries[first_idx]
+
+                # 第一个 run 中 replacement 之前的文本
+                before_text = first_run.text[: start_pos - first_start]
+                first_run.text = before_text + replacement
+
+                # 最后一个受影响的 run：保留其格式，设置 replacement 之后的文本
+                if len(affected_runs) > 1:
+                    last_idx = affected_runs[-1]
+                    last_run = runs[last_idx]
+                    _, last_start, last_end = run_boundaries[last_idx]
+                    after_text = last_run.text[end_pos - last_start :]
+                    last_run.text = after_text
+
+                    # 中间的 run：清空文本（保留格式属性）
+                    for mid_idx in affected_runs[1:-1]:
+                        runs[mid_idx].text = ""
+
+                replaced = True
+
+            # 表格中的段落也做同样处理
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            if original not in para.text:
+                                continue
+
+                            single_run_done = False
+                            for run in para.runs:
+                                if original in run.text:
+                                    run.text = run.text.replace(original, replacement, 1)
+                                    single_run_done = True
+                                    replaced = True
+                                    break
+
+                            if single_run_done:
+                                continue
+
+                            runs = para.runs
+                            if not runs:
+                                continue
+
+                            full_text = "".join(r.text for r in runs)
+                            if original not in full_text:
+                                continue
+
+                            start_pos = full_text.index(original)
+                            end_pos = start_pos + len(original)
+
+                            run_boundaries = []
+                            char_offset = 0
+                            for i, r in enumerate(runs):
+                                run_len = len(r.text)
+                                run_boundaries.append((i, char_offset, char_offset + run_len))
+                                char_offset += run_len
+
+                            affected_runs = []
+                            for idx, r_start, r_end in run_boundaries:
+                                if r_start < end_pos and r_end > start_pos:
+                                    affected_runs.append(idx)
+
+                            if not affected_runs:
+                                continue
+
+                            first_idx = affected_runs[0]
+                            first_run = runs[first_idx]
+                            _, first_start, _ = run_boundaries[first_idx]
+                            before_text = first_run.text[: start_pos - first_start]
+                            first_run.text = before_text + replacement
+
+                            if len(affected_runs) > 1:
+                                last_idx = affected_runs[-1]
+                                last_run = runs[last_idx]
+                                _, last_start, _ = run_boundaries[last_idx]
+                                after_text = last_run.text[end_pos - last_start :]
+                                last_run.text = after_text
+
+                                for mid_idx in affected_runs[1:-1]:
+                                    runs[mid_idx].text = ""
+
                             replaced = True
 
             if replaced:
