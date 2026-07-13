@@ -620,10 +620,11 @@ class DocxReviewService:
                         i_suggested = self._html_escape(issue.get("suggested", ""))
                         i_idx = issue.get("_idx", 0)
 
+                        default_color = "#666"
                         tooltip = (
-                            f"<span class='tt-type' style='color:{type_colors.get(i_type, "#666")}'>"
+                            f"<span class='tt-type' style='color:{type_colors.get(i_type, default_color)}'>"
                             f"{type_labels.get(i_type, i_type)}</span>"
-                            f"<span class='tt-severity' style='color:{severity_colors.get(i_severity, "#666")}'>"
+                            f"<span class='tt-severity' style='color:{severity_colors.get(i_severity, default_color)}'>"
                             f"[{'严重' if i_severity == 'high' else '中等' if i_severity == 'medium' else '轻微'}]</span>"
                             f"<br/><b>原因:</b> {i_reason}"
                             f"<br/><b>建议:</b> {i_suggested}"
@@ -765,10 +766,16 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
         try:
             # 获取 issues
             issues = self._get_review_issues(task_id)
-            if issue_index >= len(issues):
-                return {"success": False, "error": f"Issue 索引 {issue_index} 越界"}
+            # 按 _idx 查找目标 issue（_idx 指向原始未过滤列表中的位置）
+            target: dict | None = None
+            for issue in issues:
+                if issue.get("_idx") == issue_index:
+                    target = issue
+                    break
+            if target is None:
+                return {"success": False, "error": f"Issue 索引 {issue_index} 未找到"}
 
-            issue = issues[issue_index]
+            issue = target
 
             # 获取 DOCX 路径
             with get_db_session() as db:
@@ -843,18 +850,18 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
         if not issues:
             return {"fixed": 0, "failed": 0, "details": []}
 
-        # 确定需要修正的 issues
+        # 确定需要修正的 issues（收集 _idx）
         targets: list[int] = []
         for i, issue in enumerate(issues):
-            if issue_indices is not None and i not in issue_indices:
+            if issue_indices is not None and issue.get("_idx", i) not in issue_indices:
                 continue
             severity = issue.get("severity", "low")
             if auto_fix_low and severity == "low":
-                targets.append(i)
+                targets.append(issue.get("_idx", i))
             elif severity in ("medium", "high"):
-                targets.append(i)
+                targets.append(issue.get("_idx", i))
             elif not auto_fix_low:
-                targets.append(i)
+                targets.append(issue.get("_idx", i))
 
         if not targets:
             return {"fixed": 0, "failed": 0, "details": []}
@@ -982,7 +989,11 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
     # ==================== 辅助方法 ====================
 
     def _get_review_issues(self, task_id: str) -> list[dict]:
-        """获取任务的最新审查 issues（优先 quick review）"""
+        """获取任务的最新审查 issues（优先 quick review）
+
+        返回的每个 issue 含 _idx 字段，指向原始 issues 列表中的位置，
+        用于前端修正操作时定位。
+        """
         try:
             with get_db_session() as db:
                 review = TaskReviewCRUD.get_by_task(db, task_id, review_type="quick")
@@ -990,8 +1001,12 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
                     review = TaskReviewCRUD.get_by_task(db, task_id)
                 if review and review.issues:
                     issues = review.issues.get("issues", [])
-                    # 过滤已修正的
-                    return [i for i in issues if not i.get("_fixed")]
+                    # 过滤已修正的，但保留原始索引
+                    result = []
+                    for idx, issue in enumerate(issues):
+                        if not issue.get("_fixed"):
+                            result.append({**issue, "_idx": idx})
+                    return result
             return []
         except Exception as e:
             logger.warning("获取审查 issues 失败: %s", e)

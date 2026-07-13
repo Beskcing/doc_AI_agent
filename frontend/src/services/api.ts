@@ -367,6 +367,10 @@ export const fixSingleIssue = (taskId: string, issueIndex: number, fixText?: str
 export const batchFixIssues = (taskId: string, autoFixLow: boolean = true, issueIndices?: number[]) =>
   api.post(`/api/tasks/${taskId}/review/fix-batch`, { auto_fix_low: autoFixLow, issue_indices: issueIndices })
 
+// 重新快速审查
+export const reQuickReview = (taskId: string) =>
+  api.post(`/api/tasks/${taskId}/review/requick`)
+
 // ────────── 管理员用户管理 ──────────
 export const listUsers = (params: { page?: number; page_size?: number }) =>
   api.get('/api/admin/users', { params })

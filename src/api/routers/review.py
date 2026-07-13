@@ -313,6 +313,33 @@ async def fix_single_issue(
     return ResponseModel(data=result)
 
 
+@router.post("/{task_id}/review/requick", response_model=ResponseModel)
+async def requick_review(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_user),
+) -> ResponseModel:
+    """重新运行快速审查
+
+    修正后重新跑 quick_review 验证是否还有残留问题。
+    """
+    with get_db_session() as db:
+        task = TaskCRUD.get(db, task_id, user_id=current_user.id)
+        if not task:
+            return ResponseModel(code=404, message="任务不存在")
+        if task.status != "completed":
+            return ResponseModel(code=400, message="任务未完成")
+        if not task.result_path:
+            return ResponseModel(code=400, message="任务无输出文件")
+
+    review_service = _get_review_service()
+    result = await run_in_threadpool(review_service.quick_review, task_id)
+
+    if result is None:
+        return ResponseModel(code=500, message="快速审查失败")
+
+    return ResponseModel(data=result)
+
+
 @router.post("/{task_id}/review/fix-batch", response_model=ResponseModel)
 async def fix_batch_issues(
     task_id: str,

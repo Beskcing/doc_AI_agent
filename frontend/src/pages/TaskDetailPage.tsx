@@ -43,7 +43,7 @@ import {
   AuditOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, getOriginalPdfPages, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory, getTaskContent, getTaskContentHtml, updateTaskContent, getReview, triggerDeepReview, listReviews, getMarkedPreview, getMarkedDocxDownloadUrl, fixSingleIssue, batchFixIssues } from '../services/api'
+import { getTask, previewTask, getDownloadUrl, getDocxPreviewUrl, retryTask, getMineruDocxDownloadUrl, getMineruDocxPreviewUrl, getOriginalPdfPages, listTemplates, applyTemplateToTask, uploadCorrectedDocx, saveStyleToTemplate, getStyleHistory, getTaskContent, getTaskContentHtml, updateTaskContent, getReview, triggerDeepReview, listReviews, getMarkedPreview, getMarkedDocxDownloadUrl, fixSingleIssue, batchFixIssues, reQuickReview } from '../services/api'
 // 懒加载 DocEditor，避免 TinyMCE 影响首屏渲染
 const DocEditor = lazy(() => import('../components/DocEditor'))
 
@@ -170,6 +170,7 @@ const TaskDetailPage: React.FC = () => {
     suggested: string
     reason: string
     _fixed?: boolean
+    _idx?: number
   }
   interface ReviewData {
     review_id: string
@@ -198,6 +199,8 @@ const TaskDetailPage: React.FC = () => {
   const [markedPreviewLoading, setMarkedPreviewLoading] = useState(false)
   const [fixLoading, setFixLoading] = useState<number | null>(null)
   const [batchFixLoading, setBatchFixLoading] = useState(false)
+  const [reReviewLoading, setReReviewLoading] = useState(false)
+  const [ignoredIssueIndices, setIgnoredIssueIndices] = useState<Set<number>>(new Set())
   const [editorJumpText, setEditorJumpText] = useState<string | null>(null)
 
   // 审查筛选/排序
@@ -468,6 +471,38 @@ const TaskDetailPage: React.FC = () => {
     } finally {
       setBatchFixLoading(false)
     }
+  }
+
+  // 重新审查
+  const handleReReview = async () => {
+    if (!taskId) return
+    setReReviewLoading(true)
+    try {
+      await reQuickReview(taskId)
+      message.success('快速审查已完成')
+      fetchReview()
+      handleLoadMarkedPreview()
+    } catch (err: any) {
+      message.error(err.message || '重新审查失败')
+    } finally {
+      setReReviewLoading(false)
+    }
+  }
+
+  // 忽略 issue
+  const handleIgnoreIssue = (issueIdx: number) => {
+    setIgnoredIssueIndices(prev => {
+      const next = new Set(prev)
+      next.add(issueIdx)
+      return next
+    })
+  }
+
+  // 跳转到内容编辑 Tab（从审查标记面板）
+  const handleJumpToMarkEditor = (location: string) => {
+    setActiveTab('content_editor')
+    sessionStorage.setItem('review_jump_location', location)
+    setEditorJumpText(location)
   }
 
   // ────────── 审查辅助常量和函数 ──────────
@@ -966,7 +1001,28 @@ const TaskDetailPage: React.FC = () => {
     if (activeTab === 'review' && !quickReview && !deepReview) {
       fetchReview()
     }
+    if (activeTab === 'review_mark' && !markedPreview) {
+      handleLoadMarkedPreview()
+    }
   }, [activeTab, taskId, task?.status])
+
+  // 监听 iframe 中 issue 点击事件，滚动右侧列表到对应项
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === 'issue-click') {
+        const idx = e.data.issueIndex
+        const itemEl = document.querySelector(`[data-mark-issue-idx="${idx}"]`)
+        if (itemEl) {
+          itemEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          // 添加短暂高亮效果
+          itemEl.classList.add('issue-flash')
+          setTimeout(() => itemEl.classList.remove('issue-flash'), 1500)
+        }
+      }
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [])
 
   if (loading) {
     return (
@@ -1224,64 +1280,156 @@ const TaskDetailPage: React.FC = () => {
       ),
     })
 
-    
-            {/* 审查标记预览与修正 */}
-            {(quickReview || deepReview) && (quickReview?.issues && quickReview.issues.length > 0 || deepReview?.issues && deepReview.issues.length > 0) && (
-              <Card title="审查标记预览与修正" style={{ marginTop: 16 }}>
-                <Space style={{ marginBottom: 16 }}>
-                  <Button
-                    type="primary"
-                    icon={<EyeOutlined />}
-                    onClick={handleLoadMarkedPreview}
-                    loading={markedPreviewLoading}
-                  >
-                    加载标记预览
-                  </Button>
-                  <Button
-                    icon={<DownloadOutlined />}
-                    onClick={handleDownloadMarkedDocx}
-                  >
-                    下载标记版 DOCX
-                  </Button>
-                  <Button
-                    icon={<ThunderboltOutlined />}
-                    onClick={handleBatchFix}
-                    loading={batchFixLoading}
-                    disabled={batchFixLoading}
-                  >
-                    一键批量修正 (Low)
-                  </Button>
-                </Space>
+    // 审查标记与修正 Tab
+    const reviewIssues = quickReview?.issues || deepReview?.issues || []
+    if (reviewIssues.length > 0) {
+      tabItems.push({
+        key: 'review_mark',
+        label: <span><ThunderboltOutlined /> 审查标记与修正</span>,
+        children: (
+          <Card>
+            {/* 顶部工具栏 */}
+            <Space style={{ marginBottom: 16 }}>
+              <Button
+                type="primary"
+                icon={<EyeOutlined />}
+                onClick={handleLoadMarkedPreview}
+                loading={markedPreviewLoading}
+              >
+                加载标记预览
+              </Button>
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={handleDownloadMarkedDocx}
+              >
+                下载标记版 DOCX
+              </Button>
+              <Button
+                icon={<ThunderboltOutlined />}
+                onClick={handleBatchFix}
+                loading={batchFixLoading}
+                disabled={batchFixLoading}
+              >
+                一键批量修正 (Low)
+              </Button>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={handleReReview}
+                loading={reReviewLoading}
+              >
+                重新审查
+              </Button>
+            </Space>
 
-                {markedPreview ? (
-                  <Row gutter={16}>
-                    <Col span={14}>
-                      <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, height: 'calc(100vh - 400px)', minHeight: 400 }}>
-                        <iframe
-                          srcDoc={markedPreview.html}
-                          style={{ width: '100%', height: '100%', border: 'none' }}
-                          title="审查标记预览"
-                        />
-                      </div>
-                    </Col>
-                    <Col span={10}>
-                      <List
-                        dataSource={(markedPreview.issues || []).filter(i => !i._fixed)}
-                        style={{ maxHeight: 'calc(100vh - 450px)', overflow: 'auto' }}
-                        renderItem={(item: ReviewIssue, idx: number) => (
+            {markedPreview ? (
+              <>
+                {/* 筛选与排序 */}
+                <Row gutter={16} style={{ marginBottom: 12 }}>
+                  <Col span={6}>
+                    <Select
+                      placeholder="筛选类型"
+                      allowClear
+                      style={{ width: '100%' }}
+                      size="small"
+                      value={issueFilterType}
+                      onChange={(v) => setIssueFilterType(v || 'all')}
+                      options={[
+                        { value: 'all', label: '全部类型' },
+                        { value: 'ocr', label: 'OCR错误' },
+                        { value: 'semantic', label: '语义错误' },
+                        { value: 'text', label: '文字错误' },
+                        { value: 'structure', label: '结构问题' },
+                        { value: 'format', label: '格式问题' },
+                        { value: 'latex', label: 'LaTeX残留' },
+                      ]}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Select
+                      placeholder="严重程度"
+                      allowClear
+                      style={{ width: '100%' }}
+                      size="small"
+                      value={issueFilterSeverity}
+                      onChange={(v) => setIssueFilterSeverity(v || 'all')}
+                      options={[
+                        { value: 'all', label: '全部' },
+                        { value: 'high', label: '严重' },
+                        { value: 'medium', label: '中等' },
+                        { value: 'low', label: '轻微' },
+                      ]}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Select
+                      placeholder="排序"
+                      style={{ width: '100%' }}
+                      size="small"
+                      value={issueSortKey}
+                      onChange={(v) => setIssueSortKey(v)}
+                      options={[
+                        { value: 'severity', label: '按严重程度' },
+                        { value: 'type', label: '按类型' },
+                      ]}
+                    />
+                  </Col>
+                  <Col span={6} style={{ textAlign: 'right', lineHeight: '24px' }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      共 {markedPreview.issues?.length || 0} 个问题
+                    </Typography.Text>
+                  </Col>
+                </Row>
+
+                <Row gutter={16}>
+                  {/* 左侧：HTML 预览 (60%) */}
+                  <Col span={14}>
+                    <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, height: 'calc(100vh - 380px)', minHeight: 400 }}>
+                      <iframe
+                        srcDoc={markedPreview.html}
+                        style={{ width: '100%', height: '100%', border: 'none' }}
+                        title="审查标记预览"
+                      />
+                    </div>
+                  </Col>
+                  {/* 右侧：问题列表 (40%) */}
+                  <Col span={10}>
+                    <List
+                      className="review-issue-list"
+                      dataSource={getFilteredSortedIssues(markedPreview.issues || []).filter(i => !ignoredIssueIndices.has(i._idx ?? -1))}
+                      style={{ maxHeight: 'calc(100vh - 430px)', overflow: 'auto' }}
+                      renderItem={(item: ReviewIssue) => {
+                        const issueIdx = item._idx ?? 0
+                        return (
                           <List.Item
-                            key={idx}
+                            key={issueIdx}
+                            data-mark-issue-idx={issueIdx}
                             style={{ padding: '8px 0' }}
                             actions={[
                               <Button
                                 size="small"
                                 type="link"
                                 icon={<ThunderboltOutlined />}
-                                onClick={() => handleFixSingle(idx)}
-                                loading={fixLoading === idx}
+                                onClick={() => handleFixSingle(issueIdx)}
+                                loading={fixLoading === issueIdx}
                                 disabled={fixLoading !== null}
                               >
                                 AI修正
+                              </Button>,
+                              <Button
+                                size="small"
+                                type="link"
+                                icon={<EditOutlined />}
+                                onClick={() => handleJumpToMarkEditor(item.location)}
+                              >
+                                手动修改
+                              </Button>,
+                              <Button
+                                size="small"
+                                type="link"
+                                danger
+                                onClick={() => handleIgnoreIssue(issueIdx)}
+                              >
+                                忽略
                               </Button>,
                             ]}
                           >
@@ -1301,7 +1449,7 @@ const TaskDetailPage: React.FC = () => {
                                 <span style={{ background: '#fff2f0', padding: '1px 4px', borderRadius: 2 }}>
                                   {item.original?.substring(0, 60)}
                                 </span>
-                                {item.original?.length > 60 && '...'}
+                                {item.original && item.original.length > 60 && '...'}
                               </div>
                               {item.suggested && (
                                 <div style={{ marginTop: 2, fontSize: 12, color: '#52c41a' }}>
@@ -1310,15 +1458,19 @@ const TaskDetailPage: React.FC = () => {
                               )}
                             </div>
                           </List.Item>
-                        )}
-                      />
-                    </Col>
-                  </Row>
-                ) : (
-                  <Empty description="点击「加载标记预览」查看审查标记" />
-                )}
-              </Card>
+                        )
+                      }}
+                    />
+                  </Col>
+                </Row>
+              </>
+            ) : (
+              <Empty description="点击「加载标记预览」查看审查标记" />
             )}
+          </Card>
+        ),
+      })
+    }
 
 // 内容编辑 Tab（左右分栏：左侧 PDF 对比预览 + 右侧编辑区）
     tabItems.push({
