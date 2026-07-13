@@ -911,8 +911,10 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
         details: list[dict] = []
         fixed = 0
         failed = 0
+        total_targets = len(targets)
 
-        for idx in targets:
+        for i, idx in enumerate(targets, 1):
+            logger.info("任务 %s: 正在修正第 %d/%d 个问题 (idx=%d)", task_id, i, total_targets, idx)
             result = self.fix_single_issue(task_id, idx, mode="ai")
             if result is None:
                 details.append({"issue_index": idx, "success": False, "error": "修正服务异常"})
@@ -920,9 +922,11 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
             elif result.get("success"):
                 details.append(result)
                 fixed += 1
+                logger.info("任务 %s: 第 %d/%d 个问题修正成功", task_id, i, total_targets)
             else:
                 details.append(result)
                 failed += 1
+                logger.warning("任务 %s: 第 %d/%d 个问题修正失败: %s", task_id, i, total_targets, result.get("error"))
 
         logger.info("任务 %s: 批量修正完成, fixed=%d, failed=%d, pending=%d", task_id, fixed, failed, len(pending))
         return {"fixed": fixed, "failed": failed, "pending": pending, "details": details}

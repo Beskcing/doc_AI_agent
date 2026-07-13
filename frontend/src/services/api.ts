@@ -372,9 +372,9 @@ export const getMarkedPreview = (taskId: string) =>
 export const fixSingleIssue = (taskId: string, issueIndex: number, fixText?: string, mode: string = 'ai') =>
   api.post(`/api/tasks/${taskId}/review/fix`, { issue_index: issueIndex, fix_text: fixText, mode })
 
-// 批量修正
+// 批量修正（涉及多次 LLM 调用，超时设为 5 分钟）
 export const batchFixIssues = (taskId: string, autoFixLow: boolean = true, issueIndices?: number[]) =>
-  api.post(`/api/tasks/${taskId}/review/fix-batch`, { auto_fix_low: autoFixLow, issue_indices: issueIndices })
+  api.post(`/api/tasks/${taskId}/review/fix-batch`, { auto_fix_low: autoFixLow, issue_indices: issueIndices }, { timeout: 300000 })
 
 // 重新快速审查
 export const reQuickReview = (taskId: string) =>

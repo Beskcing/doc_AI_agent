@@ -60,19 +60,11 @@ LangChain/LangGraph (编排) + Qwen/GLM (LLM) + MinerU (PDF解析) + Pandoc/pyth
 
 | 日期 | 类型 | 摘要 |
 |------|------|------|
+| 2026-07-13 | fix | 一键批量修正超时修复: 前端 batchFixIssues API 超时从 30s 增至 5min(多次 LLM 调用耗时), 新增 loading 提示“正在批量修正，涉及多次 AI 调用，请耐心等待”, 后端 batch_fix_issues 增加逐条进度日志 |
 | 2026-07-13 | docs | 文档更新与代码注释: 重写 ARCHITECTURE.md(244行,新增系统架构图/完整模块结构/数据库模型表/认证权限/异步任务/前端架构/部署架构), 增量更新 USER_GUIDE.md(新增排版审查章节+管理员前端说明), 增量更新 DEV_GUIDE.md(补全审查模块依赖+关键文件索引+变更记录), 前端全部组件/页面添加模块级 JSDoc 注释 |
 | 2026-07-13 | fix | 审查修正/内容编辑格式保留: _replace_text_in_docx重写跨run替换逻辑(构建字符-run映射,保留所有run格式属性), 内容编辑HTML模式新增_merge_docx_content方法(将新内容合并到排版后DOCX模板,保留页面布局/分节/页眉页脚) |
 | 2026-07-13 | perf | 审查标记HTML预览性能优化: DocxReviewService增加类级别_html_cache缓存, generate_marked_html首次生成后缓存结果, 修正/重新审查操作自动清除缓存, 后续切换Tab响应<100ms |
 | 2026-07-13 | feat | 内容编辑改用排版后DOCX: ContentEditService.get_content_html改用task.result_path(formatted_styled.docx), 前端按钮文字从'MinerU原始'改为'排版后' |
 | 2026-07-13 | fix | 审查标记HTML预览tooltip修复: 将tooltip内容从HTML格式改为纯文本(\n换行), CSS white-space改为pre-line, 解决attr(data-tooltip)双转义导致显示原始标签的问题; 同步移除_build_marked_html中未使用的type_colors和severity_colors变量 |
 | 2026-07-13 | fix | 审查标记面板补全latex类型: issueTypeColors/issueTypeLabels添加latex:'LaTeX残留'(cyan), 两个审查Tab的筛选下拉框均补全latex选项 |
-| 2026-07-13 | feat | 审查标记与AI修正完整实现: DocxReviewMarker(DOCX黄色高亮+Word批注+lxml注入comments.xml+zip打包), HTML标记预览API(带tooltip气泡+postMessage点击联动), 标记版DOCX下载(FileResponse+JWT认证), 单条/批量AI修正API(_idx索引映射), 重新审查API(POST requick), 前端独立「审查标记与修正」Tab(左侧iframe预览60%+右侧问题列表40%+筛选排序+AI修正/手动修改/忽略按钮+批量修正+重新审查) |
-| 2026-07-12 | feat | 深度审查新增LaTeX公式残留审查维度: _QUICK_CHECK_PATTERNS添加50+个LaTeX命令正则(含$$/$分隔符/常用命令/希腊字母/环境/字体/运算符/修饰符), _build_summary新增latex_residue统计字段, 表格内LaTeX也能被审查覆盖 |
-| 2026-07-10 | fix | TinyMCE编辑器无法加载: main.py新增/tinymce静态文件挂载, 修复SPA fallback拦截导致返回index.html而非JS的问题 |
-| 2026-07-10 | fix | DOCX下载失败(401): TaskDetailPage下载改用fetch+Blob携带JWT token, 替换window.open(不会带Authorization头) |
-| 2026-07-10 | feat | 管理员用户管理前端页面: AdminUsersPage(表格+创建/编辑弹窗+删除+启用禁用) + api.ts 4个管理API + App路由/admin/users + AppLayout菜单集成 |
-| 2026-07-10 | fix | Docker Alembic迁移修复: env.py通过DATABASE_URL环境变量覆盖alembic.ini硬编码SQLite, 容器内alembic正确连接PostgreSQL |
-| 2026-07-10 | fix | Docker部署依赖补全: pyproject.toml添加psycopg2-binary/celery/redis/bcrypt |
-| 2026-07-10 | fix | quick_review Unicode检测正扩充合法字符范围(拉丁/希腊/数学符号等), 消除技术文档100%误报 |
-| 2026-07-10 | feat | 排版后LLM全文审查: DocxTextExtractor+TextDiff+DocxReviewService(quick_review+deep_review)+TaskReviewModel+前端审查面板 |
-| 2026-07-09 | feat | 知识库文档查看/编辑: GET/PUT /api/kb/content API + 前端弹窗编辑器 |
+

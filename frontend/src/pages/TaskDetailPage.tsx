@@ -471,8 +471,10 @@ const TaskDetailPage: React.FC = () => {
   const handleBatchFix = async () => {
     if (!taskId) return
     setBatchFixLoading(true)
+    const hideLoading = message.loading('正在批量修正，涉及多次 AI 调用，请耐心等待…', 0)
     try {
       const res = await batchFixIssues(taskId, true)
+      hideLoading()
       const data = res.data.data
       if (!data) return
 
@@ -522,6 +524,7 @@ const TaskDetailPage: React.FC = () => {
       }
       handleLoadMarkedPreview()
     } catch (err: any) {
+      hideLoading()
       message.error(err.message || '批量修正失败')
     } finally {
       setBatchFixLoading(false)
