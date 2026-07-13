@@ -848,23 +848,38 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
 
         issues = self._get_review_issues(task_id)
         if not issues:
-            return {"fixed": 0, "failed": 0, "details": []}
+            return {"fixed": 0, "failed": 0, "pending": [], "details": []}
 
         # 确定需要修正的 issues（收集 _idx）
+        # auto_fix_low=True: 仅自动修正 low 级别，medium/high 放入 pending 待确认
+        # auto_fix_low=False: 修正全部指定 issues
         targets: list[int] = []
+        pending: list[dict] = []
         for i, issue in enumerate(issues):
-            if issue_indices is not None and issue.get("_idx", i) not in issue_indices:
+            issue_idx = issue.get("_idx", i)
+            if issue_indices is not None and issue_idx not in issue_indices:
                 continue
             severity = issue.get("severity", "low")
-            if auto_fix_low and severity == "low":
-                targets.append(issue.get("_idx", i))
-            elif severity in ("medium", "high"):
-                targets.append(issue.get("_idx", i))
-            elif not auto_fix_low:
-                targets.append(issue.get("_idx", i))
+            if auto_fix_low:
+                if severity == "low":
+                    targets.append(issue_idx)
+                else:
+                    # high/medium 放入待确认列表
+                    pending.append(
+                        {
+                            "issue_index": issue_idx,
+                            "type": issue.get("type", ""),
+                            "severity": severity,
+                            "original": (issue.get("original", "") or "")[:80],
+                            "location": issue.get("location", ""),
+                            "reason": issue.get("reason", ""),
+                        }
+                    )
+            else:
+                targets.append(issue_idx)
 
-        if not targets:
-            return {"fixed": 0, "failed": 0, "details": []}
+        if not targets and not pending:
+            return {"fixed": 0, "failed": 0, "pending": [], "details": []}
 
         details: list[dict] = []
         fixed = 0
@@ -882,8 +897,8 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
                 details.append(result)
                 failed += 1
 
-        logger.info("任务 %s: 批量修正完成, fixed=%d, failed=%d", task_id, fixed, failed)
-        return {"fixed": fixed, "failed": failed, "details": details}
+        logger.info("任务 %s: 批量修正完成, fixed=%d, failed=%d, pending=%d", task_id, fixed, failed, len(pending))
+        return {"fixed": fixed, "failed": failed, "pending": pending, "details": details}
 
     def _ai_fix_text(self, task_id: str, issue: dict) -> str | None:
         """使用 LLM 生成修正文本"""

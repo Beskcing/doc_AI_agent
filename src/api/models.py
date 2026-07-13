@@ -513,4 +513,5 @@ class FixIssueResponse(BaseModel):
 
     fixed: int = Field(default=0, description="已修正数量")
     failed: int = Field(default=0, description="失败数量")
+    pending: list[dict] = Field(default_factory=list, description="待确认的高/中风险 issues 列表")
     details: list[dict] = Field(default_factory=list, description="每条修正的详情")

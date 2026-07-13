@@ -455,17 +455,60 @@ const TaskDetailPage: React.FC = () => {
     }
   }
 
-  // 批量修正 (low 级别)
+  // 批量修正 (low 级别自动修正, high/medium 弹窗确认)
   const handleBatchFix = async () => {
     if (!taskId) return
     setBatchFixLoading(true)
     try {
       const res = await batchFixIssues(taskId, true)
       const data = res.data.data
-      if (data) {
-        message.success(`批量修正完成: ${data.fixed} 成功, ${data.failed} 失败`)
-        handleLoadMarkedPreview()
+      if (!data) return
+
+      const { fixed, failed, pending } = data
+
+      if (pending && pending.length > 0) {
+        // 有中高风险问题，弹窗确认
+        const pendingList = pending.map(
+          (p: any) => `[${p.severity === 'high' ? '严重' : '中等'}] ${p.original || '(无原文)'}`
+        ).join('\n')
+        Modal.confirm({
+          title: '确认修正中/高风险问题',
+          width: 560,
+          content: (
+            <div>
+              <p>低风险问题已自动修正：<b>{fixed}</b> 条成功{failed > 0 ? `，${failed} 条失败` : ''}。</p>
+              <p style={{ marginTop: 8 }}>以下 <b>{pending.length}</b> 条中/高风险问题需要逐条确认修正：</p>
+              <pre style={{
+                background: '#fff7e6',
+                padding: '8px 12px',
+                borderRadius: 4,
+                maxHeight: 200,
+                overflow: 'auto',
+                fontSize: 12,
+                marginTop: 8,
+              }}>{pendingList}</pre>
+            </div>
+          ),
+          okText: '确认修正全部',
+          cancelText: '暂不处理',
+          onOk: async () => {
+            const indices = pending.map((p: any) => p.issue_index)
+            const res2 = await batchFixIssues(taskId, false, indices)
+            if (res2.data.data) {
+              message.success(
+                `全部修正完成: ${fixed + (res2.data.data.fixed || 0)} 成功, ${failed + (res2.data.data.failed || 0)} 失败`
+              )
+            }
+            handleLoadMarkedPreview()
+          },
+          onCancel: () => {
+            message.info(`低风险 ${fixed} 条已修正，${pending.length} 条高/中风险待处理`)
+          },
+        })
+      } else {
+        message.success(`批量修正完成: ${fixed} 成功${failed > 0 ? `，${failed} 失败` : ''}`)
       }
+      handleLoadMarkedPreview()
     } catch (err: any) {
       message.error(err.message || '批量修正失败')
     } finally {
