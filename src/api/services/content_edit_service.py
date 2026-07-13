@@ -116,26 +116,27 @@ class ContentEditService:
         }
 
     def get_content_html(self, task_id: str) -> str | None:
-        """加载文档内容为 HTML 供富文本编辑器使用"""
+        """加载文档 HTML 供富文本编辑器使用（使用排版后的 DOCX）"""
         task = self._get_task(task_id)
         if not task:
             return None
 
-        mineru_docx = self._get_mineru_docx(task_id)
-        if mineru_docx and Path(mineru_docx).exists():
+        # 优先使用排版后的 DOCX（formatted_styled.docx）
+        result_path = task.result_path
+        if result_path and Path(result_path).exists():
             try:
                 import pypandoc
 
                 html = pypandoc.convert_file(
-                    str(mineru_docx),
+                    str(result_path),
                     "html",
                     format="docx",
                     extra_args=["--wrap=none", "--standalone", "--embed-resources"],
                 )
-                logger.info("任务 %s: MinerU DOCX→HTML 加载成功, %d 字符", task_id, len(html))
+                logger.info("任务 %s: 排版后 DOCX→HTML 加载成功, %d 字符", task_id, len(html))
                 return html
             except Exception as e:
-                logger.warning("任务 %s: MinerU DOCX→HTML 转换失败: %s", task_id, e)
+                logger.warning("任务 %s: 排版后 DOCX→HTML 转换失败: %s", task_id, e)
 
         markdown_content = task.cleaned_markdown_preview
         if not markdown_content:

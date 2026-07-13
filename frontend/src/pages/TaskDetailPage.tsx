@@ -187,6 +187,7 @@ const TaskDetailPage: React.FC = () => {
       text_errors: number
       structure_issues: number
       format_issues: number
+      latex_residue: number
       overall_quality: string
     } | null
     error_message: string | null
@@ -708,6 +709,7 @@ const TaskDetailPage: React.FC = () => {
               <Tag color="volcano">文字: {review.summary.text_errors}</Tag>
               <Tag color="purple">结构: {review.summary.structure_issues}</Tag>
               <Tag color="blue">格式: {review.summary.format_issues}</Tag>
+              <Tag color="cyan">LaTeX: {review.summary.latex_residue ?? 0}</Tag>
               <Tag>质量: {review.summary.overall_quality === 'good' ? '良好' : review.summary.overall_quality === 'fair' ? '一般' : '较差'}</Tag>
             </Space>
           ) : '暂无汇总'
@@ -1529,7 +1531,7 @@ const TaskDetailPage: React.FC = () => {
             showIcon
             style={{ marginBottom: 12 }}
             message="内容编辑 + PDF 对比预览"
-            description="左侧显示原始 PDF 页面，右侧为 MinerU 原始 DOCX 编辑区。对照 PDF 内容检查解析结果是否有误，直接在右侧编辑修正。支持左右同步滚动。"
+            description="左侧显示原始 PDF 页面，右侧为排版后 DOCX 编辑区。对照 PDF 内容检查排版结果，直接在右侧编辑修正。支持左右同步滚动。"
           />
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
             {/* 左侧：PDF 预览 */}
@@ -1637,7 +1639,7 @@ const TaskDetailPage: React.FC = () => {
                       }
                     }}
                   >
-                    DOC 富文本编辑（MinerU原始）
+                    DOC 富文本编辑（排版后）
                   </Button>
                   <Button
                     size="small"
