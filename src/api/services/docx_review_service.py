@@ -44,15 +44,36 @@ _QUICK_CHECK_PATTERNS: list[tuple[str, str, str, str]] = [
         r"\$(?:\$|[^$]*\$)"  # $$...$$ 或 $...$ 分隔符残留
         r"|\\left|\\right|\\frac|\\sqrt|\\sum|\\int|\\prod|\\lim"
         r"|\\alpha|\\beta|\\gamma|\\delta|\\epsilon|\\lambda|\\mu|\\sigma|\\omega"
+        r"|\\Delta|\\Gamma|\\Theta|\\Lambda|\\Xi|\\Pi|\\Sigma|\\Upsilon|\\Phi|\\Psi|\\Omega"
         r"|\\begin|\\end"
-        r"|\\text|\\mathrm|\\mathbf|\\mathit"
+        r"|\\text|\\mathrm|\\mathbf|\\mathit|\\mathcal|\\mathbb|\\mathfrak"
         r"|\\pm|\\cdot|\\times|\\div|\\leq|\\geq|\\neq|\\approx|\\infty"
+        r"|\\equiv|\\propto|\\sim|\\simeq|\\cong|\\asymp|\\doteq"
         r"|\\partial|\\nabla|\\forall|\\exists|\\in|\\subset|\\cup|\\cap"
+        r"|\\notin|\\ni|\\subseteq|\\supseteq|\\supset|\\setminus|\\emptyset"
         r"|\\rightarrow|\\Rightarrow|\\langle|\\rangle"
-        r"|\\overline|\\underline|\\hat|\\tilde|\\bar|\\dot|\\vec",
+        r"|\\to|\\mapsto|\\iff|\\implies|\\impliedby"
+        r"|\\leftarrow|\\longleftarrow|\\longrightarrow|\\longleftrightarrow"
+        r"|\\uparrow|\\downarrow|\\updownarrow"
+        r"|\\hookleftarrow|\\hookrightarrow|\\leadsto"
+        r"|\\sin|\\cos|\\tan|\\log|\\ln|\\exp|\\max|\\min|\\det|\\gcd"
+        r"|\\limsup|\\liminf|\\arg|\\dim|\\hom|\\ker"
+        r"|\\overline|\\underline|\\hat|\\tilde|\\bar|\\dot|\\vec"
+        r"|\\widehat|\\widetilde|\\check|\\breve|\\acute|\\grave|\\ddot"
+        r"|\\ldots|\\cdots|\\ddots|\\vdots"
+        r"|\\big|\\Big|\\bigg|\\Bigg"
+        r"|\\neg|\\land|\\lor|\\oplus|\\otimes|\\ominus"
+        r"|\\circ|\\bullet|\\diamond|\\star|\\ast|\\dagger|\\ddagger"
+        r"|\\parallel|\\perp|\\mid|\\gg|\\ll|\\prec|\\succ|\\preceq|\\succeq"
+        r"|\\iint|\\iiint|\\oint"
+        r"|\\displaystyle|\\textstyle|\\operatorname|\\stackrel|\\binom"
+        r"|\\colon|\\smile|\\frown|\\models|\\bowtie"
+        r"|\\not\\b|\\triangle|\\angle|\\measuredangle|\\square|\\Box"
+        r"|\\aleph|\\hbar|\\imath|\\jmath|\\ell|\\wp|\\Re|\\Im"
+        r"|\\prime|\\backslash|\\surd|\\nabla|\\clubsuit|\\diamondsuit|\\heartsuit|\\spadesuit",
         "latex",
         "残留 LaTeX 公式语法",
-        "检查 MinerU 转换是否丢失公式，考虑手动修复或改用图片替代",
+        "将 LaTeX 语法转换为对应 Unicode 符号或删除无法转换的公式",
     ),
 ]
 
@@ -891,13 +912,37 @@ document.querySelectorAll('mark.review-issue').forEach(function(el) {{
         reason = issue.get("reason", "")
         itype = issue.get("type", "unknown")
 
-        # 简单修正直接返回建议
-        if itype in ("format", "latex") and suggested:
-            # 对于格式类问题，建议通常已经是正确的文本
-            if suggested != original:
-                return suggested
+        # 格式类问题的简单修正：建议通常已经是正确的替换文本
+        if itype == "format" and suggested and suggested != original:
+            return suggested
 
-        # 调用 LLM 修正
+        # LaTeX 残留需要 LLM 智能转换（不能直接返回通用提示语）
+        if itype == "latex":
+            prompt = f"""你是一个文档审查修正助手。以下文本中包含 LaTeX 公式语法残留，需要清理为纯文本。
+
+**原文（含 LaTeX 残留）:**
+{original}
+
+**问题原因:** {reason}
+
+处理规则：
+1. 将单个 LaTeX 命令替换为对应的 Unicode 符号（如 \\times → ×, \\alpha → α, \\rightarrow → →, \\leq → ≤）
+2. 如果是 $$...$$ 或 $...$ 包裹的简短数学表达式，提取其中可转文字的部分
+3. 如果是复杂的多行公式或无法转换为纯文本的公式，直接删除整段公式
+4. 保留所有非 LaTeX 的正常文本内容
+
+请直接输出清理后的文本（只输出结果，不要任何解释或标记）:"""
+            try:
+                response = llm.invoke(prompt).content
+                fixed = response.strip().strip('"').strip("'")
+                if fixed.startswith("```"):
+                    fixed = fixed.split("\n", 1)[-1].rsplit("\n```", 1)[0]
+                return fixed if fixed and fixed != original else original
+            except Exception as e:
+                logger.warning("AI LaTeX 修正失败: %s", e)
+                return original
+
+        # 通用 LLM 修正
         prompt = f"""你是一个文档审查修正助手。请根据审查意见修正以下文本。
 
 **原文:**
